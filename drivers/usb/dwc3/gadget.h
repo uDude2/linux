@@ -41,12 +41,12 @@ struct dwc3;
  * @binterval_m1: bInterval minus 1
  * @stream_capable: this EP is capable of handling streams
  * @ep_number: self-explanatory
- * @bulk_based: Set to ‘1’ if this isochronous endpoint represents a bulk data
- *	stream that ignores the relationship of bus time to the intervals
- *	programmed in TRBs.
- * @fifo_based: Set to ‘1’ if this isochronous endpoint represents a FIFO-based
- *	data stream where TRBs have fixed values and are never written back by
- *	the core.
+ * @bulk_based: Set to ‘1’ if this isochronous endpoint represents a bulk
+ *	data stream that ignores the relationship of bus time to the
+ *	intervals programmed in TRBs.
+ * @fifo_based: Set to ‘1’ if this isochronous endpoint represents a
+ *	FIFO-based data stream where TRBs have fixed values and are never
+ *	written back by the core.
  */
 struct dwc3_gadget_ep_depcfg_param1 {
 	unsigned	interrupt_number:4;
@@ -54,7 +54,7 @@ struct dwc3_gadget_ep_depcfg_param1 {
 	unsigned	xfer_complete_enable:1;
 	unsigned	xfer_in_progress_enable:1;
 	unsigned	xfer_not_ready_enable:1;
-	unsigned	fifo_error_enable:1;	/* underrun for IN, overrun for OUT */
+	unsigned	fifo_error_enable:1;	/* IN-underrun, OUT-overrun */
 	unsigned	reserved12:1;		/* set to zero */
 	unsigned	stream_event_enable:1;
 	unsigned	reserved14_15:2;
@@ -63,7 +63,7 @@ struct dwc3_gadget_ep_depcfg_param1 {
 	unsigned	ep_number:5;
 	unsigned	bulk_based:1;
 	unsigned	fifo_based:1;
-} __attribute__ ((packed));
+} __packed;
 
 /**
  * struct dwc3_gadget_ep_depcfg_param0 - Parameter 0 for DEPCFG
@@ -76,9 +76,9 @@ struct dwc3_gadget_ep_depcfg_param1 {
  * @data_sequence_number: Must be 0 when an endpoint is initially configured
  *	May be non-zero when an endpoint is configured after a power transition
  *	that requires a save/restore.
- * @ignore_sequence_number: Set to ‘1’ to avoid resetting the sequence number.
- *	This setting is used by software to modify the DEPEVTEN event enable
- *	bits without modifying other endpoint settings.
+ * @ignore_sequence_number: Set to ‘1’ to avoid resetting the sequence
+ *	number. This setting is used by software to modify the DEPEVTEN
+ *	event enable bits without modifying other endpoint settings.
  */
 struct dwc3_gadget_ep_depcfg_param0 {
 	unsigned	reserved0:1;
@@ -89,7 +89,7 @@ struct dwc3_gadget_ep_depcfg_param0 {
 	unsigned	burst_size:4;
 	unsigned	data_sequence_number:5;
 	unsigned	ignore_sequence_number:1;
-} __attribute__ ((packed));
+} __packed;
 
 /**
  * struct dwc3_gadget_ep_depxfercfg_param0 - Parameter 0 of DEPXFERCFG
@@ -100,7 +100,7 @@ struct dwc3_gadget_ep_depcfg_param0 {
 struct dwc3_gadget_ep_depxfercfg_param0 {
 	u16		number_xfer_resources;
 	u16		reserved16_31;
-} __attribute__ ((packed));
+} __packed;
 
 /**
  * struct dwc3_gadget_ep_depstrtxfer_param1 - Parameter 1 of DEPSTRTXFER
@@ -111,7 +111,7 @@ struct dwc3_gadget_ep_depxfercfg_param0 {
  */
 struct dwc3_gadget_ep_depstrtxfer_param1 {
 	u32		transfer_desc_addr_low;
-} __attribute__ ((packed));
+} __packed;
 
 /**
  * struct dwc3_gadget_ep_depstrtxfer_param1 - Parameter 1 of DEPSTRTXFER
@@ -120,7 +120,7 @@ struct dwc3_gadget_ep_depstrtxfer_param1 {
  */
 struct dwc3_gadget_ep_depstrtxfer_param0 {
 	u32		transfer_desc_addr_high;
-} __attribute__ ((packed));
+} __packed;
 
 struct dwc3_gadget_ep_cmd_params {
 	union {
@@ -139,7 +139,7 @@ struct dwc3_gadget_ep_cmd_params {
 		struct dwc3_gadget_ep_depxfercfg_param0 depxfercfg;
 		struct dwc3_gadget_ep_depstrtxfer_param0 depstrtxfer;
 	} param0;
-} __attribute__ ((packed));
+} __packed;
 
 /* -------------------------------------------------------------------------- */
 
