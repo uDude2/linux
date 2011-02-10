@@ -123,6 +123,7 @@ static int dwc3_init_endpoint(struct dwc3_ep *ep,
 	 * REVISIT here I should be sending the correct commands
 	 * to initialize the HW endpoint.
 	 */
+	ep->flags |= DWC3_EP_ENABLED;
 
 	return 0;
 }
@@ -133,6 +134,7 @@ static int dwc3_disable_endpoint(struct dwc3_ep *ep)
 	 * REVISIT here I should be sending correct commands
 	 * to disable the HW endpoint.
 	 */
+	ep->flags &= ~DWC3_EP_ENABLED;
 
 	return 0;
 }
@@ -400,9 +402,10 @@ static int dwc3_gadget_vbus_draw(struct usb_gadget *g, unsigned mA)
 	return 0;
 }
 
-static void __dwc3_gadget_pullup(struct dwc3 *dwc, int is_on)
+static void dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on)
 {
 	u32			reg;
+	unsigned long timeout;
 
 	reg = dwc3_readl(dwc->device, DWC3_DCTL);
 	if (is_on)
@@ -411,6 +414,21 @@ static void __dwc3_gadget_pullup(struct dwc3 *dwc, int is_on)
 		reg &= ~DWC3_DCTL_RUN_STOP;
 
 	dwc3_writel(dwc->device, DWC3_DCTL, reg);
+
+	timeout = jiffies + msecs_to_jiffies(500);
+	do {
+		reg = dwc3_readl(dwc->device, DWC3_DSTS);
+		if (is_on) {
+			if (!(reg & DWC3_DSTS_DEVCTRLHLT))
+				break;
+		} else {
+			if (reg & DWC3_DSTS_DEVCTRLHLT)
+				break;
+		}
+		cpu_relax();
+		if (time_after(jiffies, timeout))
+			break;
+	} while (1);
 
 	dev_vdbg(dwc->dev, "gadget %s data soft-%s\n",
 			dwc->gadget_driver->function,
@@ -425,7 +443,7 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 	is_on = !!is_on;
 
 	spin_lock_irqsave(&dwc->lock, flags);
-	__dwc3_gadget_pullup(dwc, is_on);
+	dwc3_gadget_run_stop(dwc, is_on);
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return 0;
@@ -457,6 +475,7 @@ static int __init dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 		}
 
 		ep->dwc = dwc;
+		ep->number = epnum;
 		dwc->eps[epnum] = ep;
 
 		snprintf(ep->name, 20, "ep%d%s", epnum, !epnum ? "shared" :
@@ -616,11 +635,82 @@ static irqreturn_t dwc3_endpoint_interrupt(struct dwc3 *dwc,
 	return ret;
 }
 
+static void dwc3_disconnect_gadget(struct dwc3 *dwc)
+{
+	if (dwc->gadget_driver && dwc->gadget_driver->disconnect) {
+		spin_unlock(&dwc->lock);
+		dwc->gadget_driver->disconnect(&dwc->gadget);
+		spin_lock(&dwc->lock);
+	}
+}
+
+static void dwc3_stop_active_transfers(struct dwc3 *dwc)
+{
+	u32 epnum;
+
+	for (epnum = 0; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
+		struct dwc3_ep *ep;
+		struct dwc3_gadget_ep_cmd_params params;
+		u32 cmd;
+		int ret;
+
+		if (epnum == 0) {
+			/*
+			 * XXX
+			 * get the core into the "Setup a Control-Setup TRB /
+			 * Start Transfer" state in case it is busy here.
+			 */
+			continue;
+		}
+		ep = dwc->eps[epnum];
+
+		if (!(ep->flags & DWC3_EP_ENABLED))
+			continue;
+
+		cmd = DWC3_DEPCMD_ENDTRANSFER;
+		/*
+		 * This one issues an interrupt. I wonder if we have to wait
+		 * for it or can simply ignore/remove the inrerupt
+		 */
+		cmd |= DWC3_DEPCMD_CMDIOC;
+		cmd |= DWC3_DEPCMD_HIPRI_FORCERM;
+		/* cmd |= DWC3_DEPCMD_PARAM(ep->transfer_resource_index_of_the_TRB); */
+		memset(&params, 0, sizeof(params));
+		ret = dwc3_send_gadget_ep_cmd(dwc, ep->number, cmd, &params);
+		WARN_ON_ONCE(ret);
+	}
+}
+
+static void dwc3_clear_stall_all_ep(struct dwc3 *dwc)
+{
+	u32 epnum;
+
+	for (epnum = 1; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
+		struct dwc3_ep *ep;
+		struct dwc3_gadget_ep_cmd_params params;
+		int ret;
+
+		ep = dwc->eps[epnum];
+
+		if (!(ep->flags & DWC3_EP_STALL))
+			continue;
+
+		ep->flags &= ~DWC3_EP_STALL;
+
+		memset(&params, 0, sizeof(params));
+		ret = dwc3_send_gadget_ep_cmd(dwc, ep->number,
+				DWC3_DEPCMD_CLEARSTALL, &params);
+		WARN_ON_ONCE(ret);
+	}
+}
+
 static irqreturn_t dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 {
-	u32			reg;
-
 	dev_vdbg(dwc->dev, "%s\n", __func__);
+#if 0
+	XXX
+	U1/U2 is powersave optimization. Skip it for now. Anyway we need to
+	enable it before we can disable it.
 
 	reg = dwc3_readl(dwc->device, DWC3_DCTL);
 	reg &= ~DWC3_DCTL_INITU1ENA;
@@ -628,6 +718,11 @@ static irqreturn_t dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 
 	reg &= ~DWC3_DCTL_INITU2ENA;
 	dwc3_writel(dwc->device, DWC3_DCTL, reg);
+#endif
+	dwc3_disconnect_gadget(dwc);
+	dwc3_stop_active_transfers(dwc);
+
+	dwc3_gadget_run_stop(dwc, 0);
 
 	return IRQ_HANDLED;
 }
@@ -638,17 +733,20 @@ static irqreturn_t dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 
 	dev_vdbg(dwc->dev, "%s\n", __func__);
 
+	dwc3_disconnect_gadget(dwc);
+	dwc3_stop_active_transfers(dwc);
+	dwc3_clear_stall_all_ep(dwc);
+
 	/* Reset device address to zero */
 	reg = dwc3_readl(dwc->device, DWC3_DCTL);
 	reg &= ~(DWC3_DCFG_DEVADDR(0));
 	dwc3_writel(dwc->device, DWC3_DCTL, reg);
 
+	/* The following could be part of dwc3_stop_active_transfers() on EP0 */
 	/* Enable ep0 in DALEPENA register */
 	reg = dwc3_readl(dwc->device, DWC3_DALEPENA);
 	reg |= DWC3_DALEPENA_EPOUT(0) | DWC3_DALEPENA_EPIN(0);
 	dwc3_writel(dwc->device, DWC3_DALEPENA, reg);
-
-	/* FIXME stop any activity on all other endpoints */
 
 	/*
 	 * Wait for RxFifo to drain
@@ -662,6 +760,8 @@ static irqreturn_t dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	 * REVISIT the below is rather CPU intensive,
 	 * maybe we should read and if it doesn't work
 	 * sleep (not busy wait) for a few useconds.
+	 *
+	 * REVISIT why wait until the RXFIFO is empty anyway?
 	 */
 	while (!(dwc3_readl(dwc->device, DWC3_DSTS)
 				& DWC3_DSTS_RXFIFOEMPTY))
@@ -862,11 +962,10 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 	spin_lock_irqsave(&dwc->lock, flags);
 
 	for (i = 0; i < DWC3_EVENT_BUFFERS_NUM; i++) {
-		irqreturn_t status;
 
-		status = dwc3_process_event_buf(dwc, i);
-		if (status == IRQ_HANDLED)
-			ret = status;
+		ret = dwc3_process_event_buf(dwc, i);
+		if (ret == IRQ_NONE)
+			break;
 	}
 
 	spin_unlock_irqrestore(&dwc->lock, flags);
