@@ -24,6 +24,7 @@
 #include <linux/spinlock.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
+#include <linux/dmapool.h>
 #include <linux/mm.h>
 
 #include <linux/usb/ch9.h>
@@ -126,6 +127,12 @@
 
 /* Global Configuration Register */
 #define DWC3_GCTL_PWRDNSCALE(n)	(n << 19)
+#define DWC3_GCTL_RAMCLKSEL(x)	((x & DWC3_GCTL_CLK_MASK) << 6)
+#define DWC3_GCTL_CLK_BUS	(0)
+#define DWC3_GCTL_CLK_PIPE	(1)
+#define DWC3_GCTL_CLK_PIPEHALF	(2)
+#define DWC3_GCTL_CLK_MASK	(3)
+
 #define DWC3_GCTL_DISSCRAMBLE	(1 << 3)
 
 /* Device Configuration Register */
@@ -250,6 +257,7 @@ struct dwc3_event_buffer {
  * struct dwc3_ep - device side endpoint representation
  * @endpoint: usb endpoint
  * @request_list: list of requests for this endpoint
+ * @trb_pool: dma pool of transaction buffers
  * @desc: usb_endpoint_descriptor pointer
  * @dwc: pointer to DWC controller
  * @flags: endpoint flags (wedged, stalled, ...)
@@ -262,6 +270,7 @@ struct dwc3_ep {
 	struct usb_ep		endpoint;
 	struct list_head	request_list;
 
+	struct dma_pool		*trb_pool;
 	struct usb_endpoint_descriptor *desc;
 	struct dwc3		*dwc;
 
@@ -305,6 +314,7 @@ enum dwc3_link_state {
 	DWC3_LINK_STATE_HRESET		= 0x09,
 	DWC3_LINK_STATE_CMPLY		= 0x0a,
 	DWC3_LINK_STATE_LPBK		= 0x0b,
+	DWC3_LINK_STATE_MASK		= 0x0f,
 };
 
 /**
