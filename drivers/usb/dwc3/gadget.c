@@ -106,7 +106,7 @@ static int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 
 	dwc3_writel(dwc->device, DWC3_DEPCMD(ep), cmd | DWC3_DEPCMD_CMDACT);
 	do {
-		reg = dwc3_readl(dwc->device, DWC3_DEPCMD(0));
+		reg = dwc3_readl(dwc->device, DWC3_DEPCMD(ep));
 		if (time_after(jiffies, timeout))
 			return -ETIMEDOUT;
 
@@ -214,6 +214,7 @@ static struct usb_request *dwc3_gadget_ep_alloc_request(struct usb_ep *ep,
 
 	req->epnum	= dep->number;
 	req->dep	= dep;
+	req->request.dma = DMA_ADDR_INVALID;
 
 	return &req->request;
 }
@@ -274,8 +275,6 @@ static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
 	req->direction		= dep->direction;
 	req->epnum		= dep->number;
 
-	dwc3_map_buffer_to_dma(req);
-
 	switch (usb_endpoint_type(dep->desc)) {
 	case USB_ENDPOINT_XFER_CONTROL:
 		trb_type = 2;
@@ -289,6 +288,8 @@ static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
 	case USB_ENDPOINT_XFER_INT:
 		trb_type = 1;
 		break;
+	default:
+		return -EINVAL;
 	}
 
 	trb = dwc3_alloc_trb(dep, trb_type, request->length, request->dma);
@@ -296,6 +297,9 @@ static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
 		dev_err(dwc->dev, "can't allocate TRB\n");
 		return -ENOMEM;
 	}
+
+	req->trb = trb;
+	dwc3_map_buffer_to_dma(req);
 
 	spin_lock_irqsave(&dwc->lock, flags);
 
