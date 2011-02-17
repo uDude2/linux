@@ -1938,6 +1938,10 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
 		if (retval < 0) {
 			dev_dbg(musb->controller, "add_hcd failed, %d\n", retval);
 			goto err2;
+
+			if ((musb->xceiv->last_event == USB_EVENT_ID)
+						&& musb->xceiv->set_vbus)
+				otg_set_vbus(musb->xceiv, 1);
 		}
 
 		if ((musb->xceiv->last_event == USB_EVENT_ID)
