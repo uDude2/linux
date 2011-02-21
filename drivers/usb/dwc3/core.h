@@ -24,7 +24,6 @@
 #include <linux/spinlock.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
-#include <linux/dmapool.h>
 #include <linux/mm.h>
 
 #include <linux/usb/ch9.h>
@@ -204,7 +203,9 @@
 #define DWC3_DGCMD_RUN_SOC_BUS_LOOPBACK	0x10
 
 /* Device Endpoint Command Register */
-#define DWC3_DEPCMD_PARAM(x)		(x << 16)
+#define DWC3_DEPCMD_PARAM(x)		(x << DWC3_DEPCMD_PARAM_SHIFT)
+#define DWC3_DEPCMD_PARAM_SHIFT		16
+#define DWC3_DEPCMD_GET_RSC_IDX(x)	((x >> DWC3_DEPCMD_PARAM_SHIFT) & 0x7)
 #define DWC3_DEPCMD_HIPRI_FORCERM	(1 << 11)
 #define DWC3_DEPCMD_CMDACT		(1 << 10)
 #define DWC3_DEPCMD_CMDIOC		(1 << 8)
@@ -228,6 +229,8 @@
 #define DWC3_DEPCMD_TYPE_INTR		3
 
 /* Structures */
+
+struct dwc3_trb;
 
 /**
  * struct dwc3_event_buffer - Software event buffer representation
@@ -253,14 +256,17 @@ struct dwc3_event_buffer {
 #define DWC3_EP_DIRECTION_TX	true
 #define DWC3_EP_DIRECTION_RX	false
 
+#define DWC3_TRB_NUM		32
+
 /**
  * struct dwc3_ep - device side endpoint representation
  * @endpoint: usb endpoint
  * @request_list: list of requests for this endpoint
- * @trb_pool: dma pool of transaction buffers
+ * @trb_pool: array of transaction buffers
  * @desc: usb_endpoint_descriptor pointer
  * @dwc: pointer to DWC controller
  * @flags: endpoint flags (wedged, stalled, ...)
+ * @current_trb: index of current used trb
  * @number: endpoint number (1 - 15)
  * @type: set to bmAttributes & USB_ENDPOINT_XFERTYPE_MASK
  * @name: a human readable name e.g. ep1out-bulk
@@ -270,7 +276,7 @@ struct dwc3_ep {
 	struct usb_ep		endpoint;
 	struct list_head	request_list;
 
-	struct dma_pool		*trb_pool;
+	struct dwc3_trb		*trb_pool;
 	struct usb_endpoint_descriptor *desc;
 	struct dwc3		*dwc;
 
@@ -278,8 +284,11 @@ struct dwc3_ep {
 #define DWC3_EP_ENABLED		(1 << 0)
 #define DWC3_EP_STALL		(1 << 1)
 
+	unsigned		current_trb;
+
 	u8			number;
 	u8			type;
+	u8			res_trans_idx;
 
 	char			name[20];
 
