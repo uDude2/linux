@@ -251,11 +251,13 @@ static void dwc3_free_trb(struct dwc3_ep *dep, struct dwc3_trb *trb)
 static void __dwc3_gadget_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 		unsigned is_chained)
 {
+	struct dwc3_gadget_ep_cmd_params params;
 	struct dwc3		*dwc = dep->dwc;
 	struct dwc3_trb		*trb = req->trb;
-	struct dwc3_gadget_ep_cmd_params params;
-	u32 res_id;
-	int ret;
+
+	u32			res_id;
+
+	int			ret;
 
 	list_add_tail(&req->list, &dep->request_list);
 
@@ -547,36 +549,36 @@ static const struct usb_gadget_ops dwc3_gadget_ops = {
 
 static int __init dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 {
-	struct dwc3_ep			*ep;
+	struct dwc3_ep			*dep;
 	u8				epnum;
 
 	INIT_LIST_HEAD(&dwc->gadget.ep_list);
 
 	for (epnum = 0; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
-		ep = kzalloc(sizeof(*ep), GFP_KERNEL);
-		if (!ep) {
+		dep = kzalloc(sizeof(*dep), GFP_KERNEL);
+		if (!dep) {
 			dev_err(dwc->dev, "can't allocate endpoint %d\n",
 					epnum);
 			return -ENOMEM;
 		}
 
-		ep->dwc = dwc;
-		ep->number = epnum;
-		dwc->eps[epnum] = ep;
+		dep->dwc = dwc;
+		dep->number = epnum;
+		dwc->eps[epnum] = dep;
 
-		snprintf(ep->name, 20, "ep%d%s", epnum, !epnum ? "shared" :
+		snprintf(dep->name, 20, "ep%d%s", epnum, !epnum ? "shared" :
 				(epnum % 2) ? "in" : "false");
-		ep->endpoint.name = ep->name;
+		dep->endpoint.name = dep->name;
 
 		if (epnum == 0) {
-			ep->endpoint.maxpacket = 64;
-			ep->endpoint.ops = &dwc3_gadget_ep0_ops;
-			dwc->gadget.ep0 = &ep->endpoint;
+			dep->endpoint.maxpacket = 64;
+			dep->endpoint.ops = &dwc3_gadget_ep0_ops;
+			dwc->gadget.ep0 = &dep->endpoint;
 		} else {
-			ep->endpoint.maxpacket = 512;
-			ep->endpoint.ops = &dwc3_gadget_ep_ops;
-			ep->direction = (epnum % 2) ? true : false;
-			list_add_tail(&ep->endpoint.ep_list,
+			dep->endpoint.maxpacket = 512;
+			dep->endpoint.ops = &dwc3_gadget_ep_ops;
+			dep->direction = (epnum % 2) ? true : false;
+			list_add_tail(&dep->endpoint.ep_list,
 					&dwc->gadget.ep_list);
 		}
 	}
@@ -729,7 +731,7 @@ static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 	u32 epnum;
 
 	for (epnum = 0; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
-		struct dwc3_ep *ep;
+		struct dwc3_ep *dep;
 		struct dwc3_gadget_ep_cmd_params params;
 		u32 cmd;
 		int ret;
@@ -742,21 +744,22 @@ static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 			 */
 			continue;
 		}
-		ep = dwc->eps[epnum];
+		dep = dwc->eps[epnum];
 
-		if (!(ep->flags & DWC3_EP_ENABLED))
+		if (!(dep->flags & DWC3_EP_ENABLED))
 			continue;
 
 		cmd = DWC3_DEPCMD_ENDTRANSFER;
+
 		/*
 		 * This one issues an interrupt. I wonder if we have to wait
 		 * for it or can simply ignore/remove the inrerupt
 		 */
 		cmd |= DWC3_DEPCMD_CMDIOC;
 		cmd |= DWC3_DEPCMD_HIPRI_FORCERM;
-		/* cmd |= DWC3_DEPCMD_PARAM(ep->transfer_resource_index_of_the_TRB); */
+		cmd |= DWC3_DEPCMD_PARAM(dep->res_trans_idx);
 		memset(&params, 0, sizeof(params));
-		ret = dwc3_send_gadget_ep_cmd(dwc, ep->number, cmd, &params);
+		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
 		WARN_ON_ONCE(ret);
 	}
 }
@@ -766,19 +769,19 @@ static void dwc3_clear_stall_all_ep(struct dwc3 *dwc)
 	u32 epnum;
 
 	for (epnum = 1; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
-		struct dwc3_ep *ep;
+		struct dwc3_ep *dep;
 		struct dwc3_gadget_ep_cmd_params params;
 		int ret;
 
-		ep = dwc->eps[epnum];
+		dep = dwc->eps[epnum];
 
-		if (!(ep->flags & DWC3_EP_STALL))
+		if (!(dep->flags & DWC3_EP_STALL))
 			continue;
 
-		ep->flags &= ~DWC3_EP_STALL;
+		dep->flags &= ~DWC3_EP_STALL;
 
 		memset(&params, 0, sizeof(params));
-		ret = dwc3_send_gadget_ep_cmd(dwc, ep->number,
+		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
 				DWC3_DEPCMD_CLEARSTALL, &params);
 		WARN_ON_ONCE(ret);
 	}
@@ -864,6 +867,7 @@ static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
 
 	if (speed != DWC3_DSTS_SUPERSPEED)
 		return;
+
 	/*
 	 * RAMClkSel is reset to 0 after USB reset, so it must be reprogrammed
 	 * each time on Connect Done.
@@ -1303,22 +1307,15 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 {
 	struct dwc3		*dwc = the_dwc;
 	unsigned long		flags;
-	int			ret;
 
-	if (!driver || !driver->unbind) {
-		ret = -EINVAL;
-		goto err0;
-	}
+	if (!driver || !driver->unbind)
+		return -EINVAL;
 
-	if (!dwc) {
-		ret = -ENODEV;
-		goto err0;
-	}
+	if (!dwc)
+		return -ENODEV;
 
-	if (dwc->gadget_driver != driver) {
-		ret = -EINVAL;
-		goto err0;
-	}
+	if (dwc->gadget_driver != driver)
+		return -EINVAL;
 
 	driver->unbind(&dwc->gadget);
 
@@ -1329,10 +1326,6 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
-
 	return 0;
-
-err0:
-	return ret;
 }
 EXPORT_SYMBOL_GPL(usb_gadget_unregister_driver);
