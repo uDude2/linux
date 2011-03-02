@@ -152,11 +152,6 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 
 	int			ret = -ENOMEM;
 
-	if (dep->flags & DWC3_EP_ENABLED) {
-		dev_vdbg(dwc->dev, "%s is already enabled\n", dep->name);
-		return 0
-	}
-
 	dep->trb_pool = kzalloc(sizeof(*trb) * DWC3_TRB_NUM, GFP_KERNEL);
 	if (!dep->trb_pool) {
 		dev_err(dwc->dev, "failed to allocate trb pool for %s\n",
@@ -247,11 +242,6 @@ static int dwc3_disable_endpoint(struct dwc3_ep *dep)
 	u32			reg;
 
 	int			ret = -ENOMEM;
-
-	if (!(dep->flags & DWC3_EP_ENABLED)) {
-		dev_vdbg(dwc->dev, "%s is already disabled\n", dep->name);
-		return 0
-	}
 
 	memset(&params, 0x00, sizeof(params));
 
