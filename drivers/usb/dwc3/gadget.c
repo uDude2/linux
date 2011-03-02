@@ -86,6 +86,9 @@ static void dwc3_unmap_buffer_from_dma(struct dwc3_request *req)
 				req->request.length, req->direction
 				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 	}
+
+	dma_unmap_single(dwc->dev, req->trb_dma, sizeof(struct dwc3_trb),
+			DMA_BIDIRECTIONAL);
 }
 
 static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
@@ -130,33 +133,162 @@ static int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	return 0;
 }
 
+/**
+ * dwc3_init_endpoint - Initializes a HW endpoint
+ * @dep: endpoint to be initialized
+ * @desc: USB Endpoint Descriptor
+ *
+ * Caller should take care of locking
+ */
 static int dwc3_init_endpoint(struct dwc3_ep *dep,
 		const struct usb_endpoint_descriptor *desc)
 {
+	struct dwc3_gadget_ep_cmd_params params;
+
 	struct dwc3_trb		*trb;
 	struct dwc3		*dwc = dep->dwc;
 
-	/*
-	 * REVISIT here I should be sending the correct commands
-	 * to initialize the HW endpoint.
-	 */
-	dep->flags |= DWC3_EP_ENABLED;
+	u32			reg;
+
+	int			ret = -ENOMEM;
+
+	if (dep->flags & DWC3_EP_ENABLED) {
+		dev_vdbg(dwc->dev, "%s is already enabled\n", dep->name);
+		return 0
+	}
+
 	dep->trb_pool = kzalloc(sizeof(*trb) * DWC3_TRB_NUM, GFP_KERNEL);
 	if (!dep->trb_pool) {
 		dev_err(dwc->dev, "failed to allocate trb pool for %s\n",
 				dep->name);
-		return -ENOMEM;
+		goto err0;
 	}
 
+	memset(&params, 0x00, sizeof(params));
+
+	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+			DWC3_DEPCMD_DEPSTARTCFG, &params);
+	if (ret) {
+		dev_err(dwc->dev, "failed to start new configuration for %s\n",
+				dep->name);
+		goto err1;
+	}
+
+
+	params.param1.depcfg.ep_number = 0;
+
+	params.param0.depcfg.ep_type = desc->bmAttributes &
+		USB_ENDPOINT_XFERTYPE_MASK;
+
+	params.param0.depcfg.ignore_sequence_number = true;
+
+	switch (dwc->speed) {
+	case DWC3_DSTS_SUPERSPEED:
+		params.param0.depcfg.max_packet_size = 512;
+		break;
+
+	case DWC3_DSTS_HIGHSPEED:
+	case DWC3_DSTS_FULLSPEED2:
+	case DWC3_DSTS_FULLSPEED1:
+		params.param0.depcfg.max_packet_size = 64;
+		break;
+
+	case DWC3_DSTS_LOWSPEED:
+		params.param0.depcfg.max_packet_size = 8;
+		break;
+	}
+
+	params.param1.depcfg.xfer_complete_enable = true;
+	params.param1.depcfg.xfer_in_progress_enable = true;
+	params.param1.depcfg.xfer_not_ready_enable = true;
+	params.param1.depcfg.ep_number = dep->number;
+
+	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+			DWC3_DEPCMD_SETEPCONFIG, &params);
+	if (ret) {
+		dev_err(dwc->dev, "failed to configure %s\n", dep->name);
+		goto err1;
+	}
+
+	dep->desc = desc;
+	dep->type = usb_endpoint_type(desc);
+	dep->flags |= DWC3_EP_ENABLED;
+
+	reg = dwc3_readl(dwc->device, DWC3_DALEPENA);
+
+	if (usb_endpoint_dir_in(dep->desc))
+		reg |= DWC3_DALEPENA_EPIN(dep->number);
+	else
+		reg |= DWC3_DALEPENA_EPOUT(dep->number);
+
+	dwc3_writel(dwc->device, DWC3_DALEPENA, reg);
+
 	return 0;
+
+err1:
+	kfree(dep->trb_pool);
+
+err0:
+	return ret;
 }
 
+/**
+ * dwc3_disable_endpoint - Disables a HW endpoint
+ * @dep: the endpoint to disable
+ *
+ * Caller should take care of locking
+ */
 static int dwc3_disable_endpoint(struct dwc3_ep *dep)
 {
-	/*
-	 * REVISIT here I should be sending correct commands
-	 * to disable the HW endpoint.
-	 */
+	struct dwc3_gadget_ep_cmd_params params;
+
+	struct dwc3		*dwc = dep->dwc;
+
+	u32			reg;
+
+	int			ret = -ENOMEM;
+
+	if (!(dep->flags & DWC3_EP_ENABLED)) {
+		dev_vdbg(dwc->dev, "%s is already disabled\n", dep->name);
+		return 0
+	}
+
+	memset(&params, 0x00, sizeof(params));
+
+	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+			DWC3_DEPCMD_DEPSTARTCFG, &params);
+	if (ret) {
+		dev_err(dwc->dev, "failed to start new configuration for %s\n",
+				dep->name);
+		return ret;
+	}
+
+	params.param0.depcfg.ep_type = 0;
+	params.param0.depcfg.ignore_sequence_number = false;
+	params.param0.depcfg.max_packet_size = 0;
+	params.param1.depcfg.xfer_complete_enable = false;
+	params.param1.depcfg.xfer_in_progress_enable = false;
+	params.param1.depcfg.xfer_not_ready_enable = false;
+	params.param1.depcfg.ep_number = dep->number;
+
+	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+			DWC3_DEPCMD_SETEPCONFIG, &params);
+	if (ret) {
+		dev_err(dwc->dev, "failed to configure %s\n", dep->name);
+		return ret;
+	}
+
+	reg = dwc3_readl(dwc->device, DWC3_DALEPENA);
+
+	if (usb_endpoint_dir_in(dep->desc))
+		reg &= ~DWC3_DALEPENA_EPIN(dep->number);
+	else
+		reg &= ~DWC3_DALEPENA_EPOUT(dep->number);
+
+	dwc3_writel(dwc->device, DWC3_DALEPENA, reg);
+
+	dep->desc = NULL;
+	dep->type = 0;
 	dep->flags &= ~DWC3_EP_ENABLED;
 
 	kfree(dep->trb_pool);
@@ -182,7 +314,10 @@ static int dwc3_gadget_ep0_disable(struct usb_ep *ep)
 static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 		const struct usb_endpoint_descriptor *desc)
 {
-	struct dwc3_ep		*dep;
+	struct dwc3_ep			*dep;
+	struct dwc3			*dwc;
+	unsigned long			flags;
+	int				ret;
 
 	if (!ep || !desc || desc->bDescriptorType != USB_DT_ENDPOINT) {
 		pr_debug("dwc3: invalid parameters\n");
@@ -195,8 +330,13 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 	}
 
 	dep = to_dwc3_ep(ep);
+	dwc = dep->dwc;
 
-	return dwc3_init_endpoint(dep, desc);
+	spin_lock_irqsave(&dwc->lock, flags);
+	ret = dwc3_init_endpoint(dep, desc);
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return ret;
 }
 
 static int dwc3_gadget_ep_disable(struct usb_ep *ep)
@@ -320,9 +460,12 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 	trb->isp_imi	= true;
 	trb->ioc	= !is_chained;
 
+	req->trb_dma = dma_map_single(dwc->dev, trb, sizeof(*trb),
+			DMA_BIDIRECTIONAL);
+
 	memset(&params, 0, sizeof(params));
 	params.param0.depstrtxfer.transfer_desc_addr_high = 0;
-	params.param1.depstrtxfer.transfer_desc_addr_low = virt_to_phys(trb);
+	params.param1.depstrtxfer.transfer_desc_addr_low = req->trb_dma;
 
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_STARTTRANSFER, &params);
@@ -439,6 +582,14 @@ static void dwc3_gadget_ep_fifo_flush(struct usb_ep *ep)
 }
 
 /* -------------------------------------------------------------------------- */
+
+static const struct usb_endpoint_descriptor dwc3_gadget_ep0_desc = {
+	.bLength	= USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+	.bEndpointAddress = 0,
+	.bmAttributes	= USB_ENDPOINT_XFER_CONTROL,
+	.bInterval	= 1, /* What value to put here ? */
+};
 
 static const struct usb_ep_ops dwc3_gadget_ep0_ops = {
 	.enable		= dwc3_gadget_ep0_enable,
@@ -684,28 +835,38 @@ static irqreturn_t dwc3_out_endpoint_interrupt(struct dwc3 *dwc,
 	return ret;
 }
 
-static void dwc3_ep0_start_dataphase(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
+static int dwc3_ep0_start_trans(struct dwc3 *dwc, u8 epnum, dma_addr_t buf_dma,
+		u32 len)
 {
 	struct dwc3_gadget_ep_cmd_params params;
 	struct dwc3_trb			*trb;
 	struct dwc3_ep			*dep;
-	u8				epnum;
 	int				ret;
 
-	epnum = event->endpoint_number;
 	dep = dwc->eps[epnum];
 
-	/* we probably should have a fix trb for this */
-	trb = dwc3_alloc_trb(dep, DWC3_TRBCTL_CONTROL_SETUP, 0);
-	if (!trb) {
-		dev_err(dwc->dev, "can't allocate TRB\n");
-		return;
+	trb = &dwc->ep0_trb;
+	memset(trb, 0, sizeof(*trb));
+
+	switch (dwc->ep0state) {
+	case EP0_IDLE:
+		trb->trbctl = DWC3_TRBCTL_CONTROL_DATA;
+		break;
+
+	case EP0_IN_DATA_PHASE:
+	case EP0_OUT_DATA_PHASE:
+		/* XXX check for status3 */
+		trb->trbctl = DWC3_TRBCTL_CONTROL_STATUS2;
+		break;
+
+	default:
+		dev_err(dwc->dev, "%s() can't in state %d\n", __func__,
+				dwc->ep0state);
+		return -EINVAL;
 	}
 
-	trb->bpl = dma_map_single(dwc->dev, &dwc->ctrl_req,
-			sizeof(dwc->ctrl_req), epnum
-			? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+	trb->bpl = buf_dma;
+	trb->length = len;
 
 	trb->hwo	= 1;
 	trb->lst	= 1;
@@ -713,22 +874,44 @@ static void dwc3_ep0_start_dataphase(struct dwc3 *dwc,
 	trb->isp_imi	= 1;
 	trb->ioc	= 1;
 
+	dwc->ep0_trb_addr = dma_map_single(dwc->dev, trb, sizeof(*trb),
+			DMA_BIDIRECTIONAL);
+
 	memset(&params, 0, sizeof(params));
-	params.param1.depstrtxfer.transfer_desc_addr_low = virt_to_phys(trb);
+	params.param1.depstrtxfer.transfer_desc_addr_low = dwc->ep0_trb_addr;
 
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_STARTTRANSFER, &params);
 	if (ret < 0) {
 		dev_dbg(dwc->dev, "failed to send STARTTRANSFER command\n");
-		dma_unmap_single(dwc->dev, trb->bpl,
-				sizeof(dwc->ctrl_req), epnum
-				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
-		dwc3_free_trb(dep, trb);
-		return;
+		dma_unmap_single(dwc->dev, dwc->ep0_trb_addr, sizeof(*trb),
+				DMA_BIDIRECTIONAL);
+		return ret;
 	}
 
 	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
 			dep->number);
+	return 0;
+}
+
+static void dwc3_ep0_start_dataphase(struct dwc3 *dwc,
+		struct dwc3_event_depevt *event)
+{
+	u8				epnum;
+	int				ret;
+
+	epnum = event->endpoint_number;
+
+	dwc->ctrl_req_addr = dma_map_single(dwc->dev, &dwc->ctrl_req,
+			sizeof(dwc->ctrl_req), DMA_FROM_DEVICE);
+
+	ret = dwc3_ep0_start_trans(dwc, epnum, dwc->ctrl_req_addr,
+			sizeof(dwc->ctrl_req));
+	if (ret < 0) {
+		dma_unmap_single(dwc->dev, dwc->ctrl_req_addr,
+				sizeof(dwc->ctrl_req), DMA_FROM_DEVICE);
+		return;
+	}
 
 	if (epnum)
 		dwc->ep0state = EP0_IN_DATA_PHASE;
@@ -985,6 +1168,7 @@ static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
 static irqreturn_t dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 {
 	struct dwc3_gadget_ep_cmd_params params;
+	struct dwc3_ep		*dep;
 
 	u32			reg;
 	int			ret;
@@ -1002,43 +1186,19 @@ static irqreturn_t dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	dwc3_update_ram_clk_sel(dwc, speed);
 
-	params.param1.depcfg.ep_number = 0;
-	params.param0.depcfg.ep_type = DWC3_DEPCMD_TYPE_CONTROL;
-	params.param0.depcfg.ignore_sequence_number = true;
-
-	switch (speed) {
-	case DWC3_DSTS_SUPERSPEED:
-		params.param0.depcfg.max_packet_size = 512;
-		break;
-
-	case DWC3_DSTS_HIGHSPEED:
-	case DWC3_DSTS_FULLSPEED2:
-	case DWC3_DSTS_FULLSPEED1:
-		params.param0.depcfg.max_packet_size = 64;
-		break;
-
-	case DWC3_DSTS_LOWSPEED:
-		params.param0.depcfg.max_packet_size = 8;
-		break;
+	dep = dwc->eps[0];
+	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
+		return IRQ_NONE;
 	}
 
-	params.param1.depcfg.xfer_complete_enable = true;
-	params.param1.depcfg.xfer_in_progress_enable = true;
-	params.param1.depcfg.xfer_not_ready_enable = true;
-
-	/*
-	 * XXX
-	 * Should one of these commands ever fail we probably should start an
-	 * disconnect event or something like that.
-	 */
-	ret = dwc3_send_gadget_ep_cmd(dwc, 0, DWC3_DEPCMD_SETEPCONFIG, &params);
-	if (ret)
+	dep = dwc->eps[1];
+	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
 		return IRQ_NONE;
-
-	params.param1.depcfg.ep_number = 1;
-	ret = dwc3_send_gadget_ep_cmd(dwc, 1, DWC3_DEPCMD_SETEPCONFIG, &params);
-	if (ret)
-		return IRQ_NONE;
+	}
 
 	/*
 	 * Configure PHY via GUSB3PIPECTLn if required.
@@ -1211,6 +1371,7 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 {
 	struct dwc3_gadget_ep_cmd_params	params;
+	struct dwc3_ep				*dep;
 
 	u32					reg;
 	int					ret;
@@ -1255,28 +1416,23 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	reg &= ~(DWC3_DEVTEN_SOFEN | DWC3_DEVTEN_EOPFEN);
 	dwc3_writel(dwc->device, DWC3_DEVTEN, reg);
 
-	ret = dwc3_send_gadget_ep_cmd(dwc, 0, DWC3_DEPCMD_DEPSTARTCFG, &params);
+	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)
 		return ret;
 
-	params.param1.depcfg.ep_number = 0;
-	params.param0.depcfg.ep_type = DWC3_DEPCMD_TYPE_CONTROL;
-	params.param0.depcfg.burst_size = 0;
-	params.param0.depcfg.max_packet_size = 512;
-	params.param0.depcfg.fifo_number = 0;
-
-	params.param1.depcfg.xfer_not_ready_enable = true;
-	params.param1.depcfg.xfer_complete_enable = true;
-
-	ret = dwc3_send_gadget_ep_cmd(dwc, 0, DWC3_DEPCMD_SETEPCONFIG, &params);
-	if (ret)
+	dep = dwc->eps[0];
+	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
 		return ret;
+	}
 
-	params.param1.depcfg.ep_number = 1;
-
-	ret = dwc3_send_gadget_ep_cmd(dwc, 1, DWC3_DEPCMD_SETEPCONFIG, &params);
-	if (ret)
+	dep = dwc->eps[1];
+	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
 		return ret;
+	}
 
 	/* first zero the whole thing */
 	memset(&params, 0x00, sizeof(params));
@@ -1310,14 +1466,6 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 		return ret;
 #endif
 
-	/* Enable physical EPs 0 & 1 */
-	dwc3_writel(dwc->device, DWC3_DALEPENA, DWC3_DALEPENA_EPOUT(0)
-			| DWC3_DALEPENA_EPIN(0));
-
-	ret = dwc3_gadget_init_endpoints(dwc);
-	if (ret)
-		return ret;
-
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
 	ret = request_irq(irq, dwc3_interrupt, 0, "dwc3", dwc);
@@ -1333,10 +1481,15 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
 {
 	int			irq;
+	int			i;
 
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
 	free_irq(irq, dwc);
+
+	for (i = 0; i < ARRAY_SIZE(dwc->eps); i++)
+		dwc3_disable_endpoint(dwc->eps[i]);
+
 	dwc3_gadget_free_endpoints(dwc);
 }
 

@@ -278,7 +278,7 @@ struct dwc3_ep {
 	struct list_head	request_list;
 
 	struct dwc3_trb		*trb_pool;
-	struct usb_endpoint_descriptor *desc;
+	const struct usb_endpoint_descriptor *desc;
 	struct dwc3		*dwc;
 
 	unsigned		flags;
@@ -403,6 +403,8 @@ struct dwc3_trb {
 struct dwc3 {
 	struct usb_ctrlrequest	ctrl_req __aligned(16);
 	struct dwc3_trb		ep0_trb __aligned(16);
+	dma_addr_t		ctrl_req_addr;
+	dma_addr_t		ep0_trb_addr;
 	/* device lock */
 	spinlock_t		lock;
 	struct device		*dev;
