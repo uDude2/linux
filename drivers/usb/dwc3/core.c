@@ -37,16 +37,12 @@
 #ifdef CONFIG_PM
 static int dwc3_suspend(struct device *dev)
 {
-	pm_runtime_put_sync(dev);
-
-	return 0;
+	return pm_runtime_put_sync(dev);
 }
 
 static int dwc3_resume(struct device *dev)
 {
-	pm_runtime_get_sync(dev);
-
-	return 0;
+	return pm_runtime_get_sync(dev);
 }
 
 static const struct dev_pm_ops dwc3_pm_ops = {
@@ -168,6 +164,7 @@ static int __devinit dwc3_event_buffers_setup(struct dwc3 *dwc)
 				evt->length & 0xffff);
 		dwc3_writel(dwc->global, DWC3_GEVNTCOUNT(n), 0);
 	}
+
 	return 0;
 }
 
@@ -471,7 +468,11 @@ static int __init dwc3_init(void)
 {
 	return platform_driver_register(&dwc3_driver);
 }
-module_init(dwc3_init);
+/*
+ * We have to initialize after usbcore and I2C but still
+ * before usb gadget drivers and usb host drivers.
+ */
+fs_initcall(dwc3_init);
 
 static void __exit dwc3_exit(void)
 {
