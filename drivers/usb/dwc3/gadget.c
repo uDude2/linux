@@ -78,7 +78,8 @@ static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 {
 	struct dwc3			*dwc = dep->dwc;
 
-	list_del(&req->list);
+	dwc3_gadget_del_request(req);
+
 	if (req->request.status == -EINPROGRESS)
 		req->request.status = status;
 
@@ -115,6 +116,29 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	return 0;
 }
 
+static int dwc_alloc_trb_pool(struct dwc3_ep *dep)
+{
+	if (dep->trb_pool)
+		return 0;
+	if (dep->number == 0 || dep->number == 1)
+		return 0;
+
+	dep->trb_pool = kzalloc(sizeof(struct dwc3_trb) * DWC3_TRB_NUM,
+			GFP_KERNEL);
+	if (!dep->trb_pool) {
+		dev_err(dep->dwc->dev, "failed to allocate trb pool for %s\n",
+				dep->name);
+		return -ENOMEM;
+	}
+	return 0;
+}
+
+static void dwc_free_trb_pool(struct dwc3_ep *dep)
+{
+	kfree(dep->trb_pool);
+	dep->trb_pool = NULL;
+}
+
 /**
  * dwc3_init_endpoint - Initializes a HW endpoint
  * @dep: endpoint to be initialized
@@ -127,7 +151,6 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 {
 	struct dwc3_gadget_ep_cmd_params params;
 
-	struct dwc3_trb		*trb;
 	struct dwc3		*dwc = dep->dwc;
 
 	u32			reg;
@@ -139,12 +162,8 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 		return 0;
 	}
 
-	dep->trb_pool = kzalloc(sizeof(*trb) * DWC3_TRB_NUM, GFP_KERNEL);
-	if (!dep->trb_pool) {
-		dev_err(dwc->dev, "failed to allocate trb pool for %s\n",
-				dep->name);
+	if (dwc_alloc_trb_pool(dep))
 		goto err0;
-	}
 
 	memset(&params, 0x00, sizeof(params));
 
@@ -189,6 +208,13 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 		goto err1;
 	}
 
+	memset(&params, 0x00, sizeof(params));
+	params.param0.depxfercfg.number_xfer_resources = 1;
+	ret = dwc3_send_gadget_ep_cmd(dwc, 0,
+			DWC3_DEPCMD_SETTRANSFRESOURCE, &params);
+	if (ret)
+		goto err1;
+
 	dep->desc = desc;
 	dep->type = usb_endpoint_type(desc);
 	dep->flags |= DWC3_EP_ENABLED;
@@ -205,7 +231,7 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 	return 0;
 
 err1:
-	kfree(dep->trb_pool);
+	dwc_free_trb_pool(dep);
 
 err0:
 	return ret;
@@ -270,7 +296,7 @@ static int dwc3_disable_endpoint(struct dwc3_ep *dep)
 	dep->type = 0;
 	dep->flags &= ~DWC3_EP_ENABLED;
 
-	kfree(dep->trb_pool);
+	dwc_free_trb_pool(dep);
 
 	return 0;
 }
@@ -382,18 +408,96 @@ static void dwc3_free_trb(struct dwc3_ep *dep, struct dwc3_trb *trb)
 	/* TODO */
 }
 
+static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep,
+		struct dwc3_request *req, unsigned is_chained)
+{
+	struct dwc3		*dwc = dep->dwc;
+	struct dwc3_trb		*trb = req->trb;
+	int			ret;
+
+	trb->bpl	= req->request.dma;
+	trb->hwo	= true;
+	trb->lst	= !is_chained;
+	trb->chn	= !!is_chained;
+	trb->ioc	= !is_chained;
+
+	if (usb_endpoint_xfer_isoc(dep->desc))
+		trb->isp_imi = true;
+
+	req->trb_dma = dma_map_single(dwc->dev, trb, sizeof(*trb),
+			DMA_BIDIRECTIONAL);
+
+	if (!is_chained) {
+		struct dwc3_gadget_ep_cmd_params params;
+
+		/*
+		 * We change the pointer here. This is needed in case we
+		 * are handling chained TRBs.
+		 *
+		 * On that scenario, we need to prepare all TRBs (map
+		 * the TRB buffer to DMA) but kick the transfer with
+		 * the first one on the list.
+		 */
+		req = next_request(dep);
+
+		memset(&params, 0, sizeof(params));
+		params.param0.depstrtxfer.transfer_desc_addr_high = 0;
+		params.param1.depstrtxfer.transfer_desc_addr_low = request->trb_dma;
+
+		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+				DWC3_DEPCMD_STARTTRANSFER, &params);
+		if (ret < 0) {
+			dev_dbg(dwc->dev, "failed to send STARTTRANSFER command\n");
+			dwc3_unmap_buffer_from_dma(req);
+			dwc3_free_trb(dep, trb);
+			list_del(&req->list);
+
+			/*
+			 * FIXME we need to iterate over the list of requests
+			 * here and stop, unmap, free and del each of the linked
+			 * requests.
+			 */
+			return ret;
+		}
+
+		dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
+				dep->number);
+	}
+
+	return 0;
+}
+
+static int __dwc3_gadget_kick_transfers(struct dwc3_ep *dep)
+{
+	struct dwc3		*dwc = dep->dwc;
+	struct dwc3_request	*req;
+
+	unsigned		count = dep->request_count;
+	unsigned		i = 0;
+
+	int			ret = 0;
+
+	list_for_each_entry(req, &dep->request_list, list) {
+		i++;
+		ret = __dwc3_gadget_kick_transfer(dep, req,
+				(i == count - 1) ? false : true);
+		if (ret) {
+			dev_err(dwc->dev, "%s failed to start request %p\n",
+					dep->name, req);
+			break;
+		}
+	}
+
+	return ret;
+}
+
 static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 		unsigned is_chained)
 {
-	struct dwc3_gadget_ep_cmd_params params;
 	struct dwc3		*dwc = dep->dwc;
 	struct dwc3_trb		*trb;
 
-	struct usb_request	*request = &req->request;
-
 	unsigned		trb_type;
-
-	int			ret;
 
 	req->request.actual	= 0;
 	req->request.status	= -EINPROGRESS;
@@ -415,7 +519,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 		return -EINVAL;
 	}
 
-	trb = dwc3_alloc_trb(dep, trb_type, request->length);
+	trb = dwc3_alloc_trb(dep, trb_type, req->request.length);
 	if (!trb) {
 		dev_err(dwc->dev, "can't allocate TRB\n");
 		return -ENOMEM;
@@ -424,44 +528,15 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 	req->trb = trb;
 	dwc3_map_buffer_to_dma(req);
 
-	list_add_tail(&req->list, &dep->request_list);
+	dwc3_gadget_add_request(dep, req);
 
-	if (!list_is_singular(&dep->request_list)) {
+	if (dep->request_count == 1) {
 		dev_vdbg(dwc->dev, "%s's request_list isn't singular\n",
 				dep->name);
 		return 0;
 	}
 
-	trb->bpl	= req->request.dma;
-	trb->hwo	= true;
-	trb->lst	= !is_chained;
-	trb->chn	= !!is_chained;
-	trb->ioc	= !is_chained;
-
-	if (usb_endpoint_xfer_isoc(dep->desc))
-		trb->isp_imi = true;
-
-	req->trb_dma = dma_map_single(dwc->dev, trb, sizeof(*trb),
-			DMA_BIDIRECTIONAL);
-
-	memset(&params, 0, sizeof(params));
-	params.param0.depstrtxfer.transfer_desc_addr_high = 0;
-	params.param1.depstrtxfer.transfer_desc_addr_low = req->trb_dma;
-
-	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
-			DWC3_DEPCMD_STARTTRANSFER, &params);
-	if (ret < 0) {
-		dev_dbg(dwc->dev, "failed to send STARTTRANSFER command\n");
-		dwc3_unmap_buffer_from_dma(req);
-		dwc3_free_trb(dep, trb);
-		list_del(&req->list);
-		return ret;
-	}
-
-	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
-			dep->number);
-
-	return 0;
+	return __dwc3_gadget_kick_transfer(dep, req, is_chained);
 }
 
 static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
@@ -881,6 +956,7 @@ static irqreturn_t dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 {
 	struct dwc3_request	*req;
 	unsigned		status = 0;
+	int			ret;
 
 	req = next_request(dep);
 
@@ -919,6 +995,21 @@ static irqreturn_t dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	 */
 	dwc3_gadget_giveback(dep, req, status);
 
+	if (!dep->request_count)
+		goto out;
+
+	ret = __dwc3_gadget_kick_transfers(dep);
+	if (ret) {
+		dev_err(dwc->dev, "%s failed to start next request\n",
+				dep->name);
+		/*
+		 * FIXME on error, we should be giving back all broken
+		 * requests so gadget driver can re-start them or take
+		 * any other action
+		 */
+	}
+
+out:
 	return IRQ_HANDLED;
 }
 
@@ -1391,9 +1482,6 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
  */
 int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 {
-	struct dwc3_gadget_ep_cmd_params	params;
-	struct dwc3_ep				*dep;
-
 	u32					reg;
 	int					ret;
 	int					irq;
@@ -1409,8 +1497,6 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dwc->gadget.name		= "dwc3-gadget";
 
 	the_dwc				= dwc;
-
-	memset(&params, 0x00, sizeof(params));
 
 	/* flush all fifos */
 	reg = DWC3_DGCMD_ALL_FIFO_FLUSH;
@@ -1439,39 +1525,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 
 	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)
-		return ret;
-
-	dep = dwc->eps[0];
-	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
-	if (ret) {
-		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
-		return ret;
-	}
-
-	dep = dwc->eps[1];
-	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
-	if (ret) {
-		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
-		return ret;
-	}
-
-	/* first zero the whole thing */
-	memset(&params, 0x00, sizeof(params));
-
-	params.param0.depxfercfg.number_xfer_resources = 1;
-
-	ret = dwc3_send_gadget_ep_cmd(dwc, 0,
-			DWC3_DEPCMD_SETTRANSFRESOURCE, &params);
-	if (ret)
-		return ret;
-
-	ret = dwc3_send_gadget_ep_cmd(dwc, 1,
-			DWC3_DEPCMD_SETTRANSFRESOURCE, &params);
-	if (ret)
-		return ret;
-
-	/* first zero the whole thing */
-	memset(&params, 0x00, sizeof(params));
+		goto err1;
 
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
@@ -1479,12 +1533,20 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	if (ret) {
 		dev_err(dwc->dev, "failed to request irq #%d --> %d\n",
 				irq, ret);
-		return ret;
+		goto err2;
 	}
 	/* begin to receive SETUP packets */
 	dwc3_ep0_out_start(dwc, 0);
 
 	return 0;
+
+err2:
+	dwc3_gadget_free_endpoints(dwc);
+
+err1:
+	the_dwc = NULL;
+
+	return ret;
 }
 
 void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
@@ -1500,6 +1562,8 @@ void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
 		dwc3_disable_endpoint(dwc->eps[i]);
 
 	dwc3_gadget_free_endpoints(dwc);
+
+	the_dwc = NULL;
 }
 
 /* -------------------------------------------------------------------------- */
