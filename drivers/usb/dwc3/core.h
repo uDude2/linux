@@ -25,6 +25,7 @@
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
 #include <linux/mm.h>
+#include <linux/completion.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -214,8 +215,8 @@
 #define DWC3_DGCMD_RUN_SOC_BUS_LOOPBACK	0x10
 
 /* Device Endpoint Command Register */
-#define DWC3_DEPCMD_PARAM(x)		(x << DWC3_DEPCMD_PARAM_SHIFT)
 #define DWC3_DEPCMD_PARAM_SHIFT		16
+#define DWC3_DEPCMD_PARAM(x)		(x << DWC3_DEPCMD_PARAM_SHIFT)
 #define DWC3_DEPCMD_GET_RSC_IDX(x)	((x >> DWC3_DEPCMD_PARAM_SHIFT) & 0x7)
 #define DWC3_DEPCMD_HIPRI_FORCERM	(1 << 11)
 #define DWC3_DEPCMD_CMDACT		(1 << 10)
@@ -341,6 +342,12 @@ enum dwc3_link_state {
 	DWC3_LINK_STATE_MASK		= 0x0f,
 };
 
+enum dwc3_trb_status {
+	DWC3_TRB_STATUS_OK		= 0,
+	DWC3_TRB_STATUS_MISSED_ISOC	= 1,
+	DWC3_TRB_STATUS_SETUP_PENDING	= 2,
+};
+
 /**
  * struct dwc3_trb - transfer request block
  * @bpl: lower 32bit of the buffer
@@ -394,6 +401,7 @@ struct dwc3_trb {
  * struct dwc3 - representation of our controller
  * ctrl_req: usb control request which is used for ep0
  * ep0_trb: trb which is used for the ctrl_req
+ * @ep_cmd_complete: completion for EP CMD Complete IRQ
  * ctrl_req_addr: dma address of ctrl_req
  * ep0_trb: dma address of ep0_trb
  * @lock: for synchronizing
@@ -420,6 +428,9 @@ struct dwc3_trb {
 struct dwc3 {
 	struct usb_ctrlrequest	ctrl_req __aligned(16);
 	struct dwc3_trb		ep0_trb __aligned(16);
+
+	struct completion	ep_cmd_complete;
+
 	dma_addr_t		ctrl_req_addr;
 	dma_addr_t		ep0_trb_addr;
 	/* device lock */
