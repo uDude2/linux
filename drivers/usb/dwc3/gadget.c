@@ -117,6 +117,7 @@ static int dwc_alloc_trb_pool(struct dwc3_ep *dep)
 {
 	if (dep->trb_pool)
 		return 0;
+
 	if (dep->number == 0 || dep->number == 1)
 		return 0;
 
@@ -127,6 +128,7 @@ static int dwc_alloc_trb_pool(struct dwc3_ep *dep)
 				dep->name);
 		return -ENOMEM;
 	}
+
 	return 0;
 }
 
@@ -176,27 +178,27 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 		USB_ENDPOINT_XFERTYPE_MASK;
 
 	params.param0.depcfg.ignore_sequence_number = true;
-
-	switch (dwc->speed) {
-	case DWC3_DSTS_SUPERSPEED:
-		params.param0.depcfg.max_packet_size = 512;
-		break;
-
-	case DWC3_DSTS_HIGHSPEED:
-	case DWC3_DSTS_FULLSPEED2:
-	case DWC3_DSTS_FULLSPEED1:
-		params.param0.depcfg.max_packet_size = 64;
-		break;
-
-	case DWC3_DSTS_LOWSPEED:
-		params.param0.depcfg.max_packet_size = 8;
-		break;
-	}
+	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
 
 	params.param1.depcfg.xfer_complete_enable = true;
 	params.param1.depcfg.xfer_in_progress_enable = true;
 	params.param1.depcfg.xfer_not_ready_enable = true;
 	params.param1.depcfg.ep_number = dep->number;
+
+	/*
+	 * REVISIT for some reason, databook says in case we're
+	 * working in FullSpeed binterval_m1 field from DEPCFG
+	 * parameter 1, _MUST_ be set to zero. Gadget drivers use
+	 * those at least on interrupt endpoints both on high and
+	 * full speed.
+	 *
+	 * Maybe we just don't need to let the hardware know about
+	 * it. Anyway, if we're not working on FULLSPEED we have
+	 * to set binterval_m1 field to desc->bInterval - 1
+	 */
+	if (dwc->speed != DWC3_DSTS_FULLSPEED2 &&
+			dwc->speed != DWC3_DSTS_FULLSPEED1)
+		params.param1.depcfg.binterval_m1 = desc->bInterval - 1;
 
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_SETEPCONFIG, &params);
@@ -412,8 +414,10 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep)
 		trb->chn = !last_one;
 		trb->ioc = last_one;
 
-		if (usb_endpoint_xfer_isoc(dep->desc))
+		if (usb_endpoint_xfer_isoc(dep->desc)) {
 			trb->isp_imi = true;
+			trb->csp = true;
+		}
 
 		switch (usb_endpoint_type(dep->desc)) {
 		case USB_ENDPOINT_XFER_CONTROL:
@@ -751,8 +755,8 @@ static int dwc3_gadget_wakeup(struct usb_gadget *g)
 	/*
 	 * Switch link state to Recovery. In HS/FS/LS this means
 	 * RemoteWakeup Request
-	 * */
-	reg |= DCW3_DCTL_ULSTCHNG_RECOVERY;
+	 */
+	reg |= DWC3_DCTL_ULSTCHNG_RECOVERY;
 	dwc3_writel(dwc->device, DWC3_DCTL, reg);
 
 	/* wait for at least 2000us */
@@ -760,6 +764,7 @@ static int dwc3_gadget_wakeup(struct usb_gadget *g)
 
 	/* write zeroes to Link Change Request */
 	reg &= ~DWC3_DCTL_ULSTCHNGREQ_MASK;
+	dwc3_writel(dwc->device, DWC3_DCTL, reg);
 
 	/* pool until Link State change to ON */
 	timeout = jiffies + msecs_to_jiffies(100);
