@@ -275,6 +275,8 @@ struct dwc3_event_buffer {
  * @request_list: list of requests for this endpoint
  * @request_count: number of requests in our list
  * @trb_pool: array of transaction buffers
+ * @free_slot: next slot which is going to be used
+ * @busy_slot: first slot which is owned by HW
  * @desc: usb_endpoint_descriptor pointer
  * @dwc: pointer to DWC controller
  * @flags: endpoint flags (wedged, stalled, ...)
@@ -282,6 +284,7 @@ struct dwc3_event_buffer {
  * @number: endpoint number (1 - 15)
  * @type: set to bmAttributes & USB_ENDPOINT_XFERTYPE_MASK
  * @res_trans_idx: Resource transfer index
+ * @interval: the intervall on which the ISOC transfer is started
  * @name: a human readable name e.g. ep1out-bulk
  * @direction: true for TX, false for RX
  */
@@ -291,6 +294,8 @@ struct dwc3_ep {
 	unsigned		request_count;
 
 	struct dwc3_trb		*trb_pool;
+	u32			free_slot;
+	u32			busy_slot;
 	const struct usb_endpoint_descriptor *desc;
 	struct dwc3		*dwc;
 
@@ -298,12 +303,14 @@ struct dwc3_ep {
 #define DWC3_EP_ENABLED		(1 << 0)
 #define DWC3_EP_STALL		(1 << 1)
 #define DWC3_EP_WEDGE		(1 << 2)
+#define DWC3_EP_ISOC_RUNNING	(1 << 3)
 
 	unsigned		current_trb;
 
 	u8			number;
 	u8			type;
 	u8			res_trans_idx;
+	u32			interval;
 
 	char			name[20];
 
