@@ -1,7 +1,7 @@
 /**
  * gadget.c - DesignWare USB3 DRD Controller Gadget Framework Link
  *
- * Copyright (C) 2010 Texas Instruments Incorporated - http://www.ti.com
+ * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
  * Author: Felipe Balbi <balbi@ti.com>
  *
  * This program is free software: you can redistribute it and/or modify
@@ -116,7 +116,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	return 0;
 }
 
-static int dwc_alloc_trb_pool(struct dwc3_ep *dep)
+static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
 {
 	if (dep->trb_pool)
 		return 0;
@@ -135,20 +135,20 @@ static int dwc_alloc_trb_pool(struct dwc3_ep *dep)
 	return 0;
 }
 
-static void dwc_free_trb_pool(struct dwc3_ep *dep)
+static void dwc3_free_trb_pool(struct dwc3_ep *dep)
 {
 	kfree(dep->trb_pool);
 	dep->trb_pool = NULL;
 }
 
 /**
- * dwc3_init_endpoint - Initializes a HW endpoint
+ * __dwc3_gadget_ep_enable - Initializes a HW endpoint
  * @dep: endpoint to be initialized
  * @desc: USB Endpoint Descriptor
  *
  * Caller should take care of locking
  */
-static int dwc3_init_endpoint(struct dwc3_ep *dep,
+static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		const struct usb_endpoint_descriptor *desc)
 {
 	struct dwc3_gadget_ep_cmd_params params;
@@ -160,11 +160,12 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 	int			ret = -ENOMEM;
 
 	if (dep->flags & DWC3_EP_ENABLED) {
-		WARN_ONCE(true, "%s is already enabled\n", dep->name);
+		dev_WARN_ONCE(dwc->dev, true, "%s is already enabled\n",
+				dep->name);
 		return 0;
 	}
 
-	if (dwc_alloc_trb_pool(dep))
+	if (dwc3_alloc_trb_pool(dep))
 		goto err0;
 
 	memset(&params, 0x00, sizeof(params));
@@ -235,19 +236,19 @@ static int dwc3_init_endpoint(struct dwc3_ep *dep,
 	return 0;
 
 err1:
-	dwc_free_trb_pool(dep);
+	dwc3_free_trb_pool(dep);
 
 err0:
 	return ret;
 }
 
 /**
- * dwc3_disable_endpoint - Disables a HW endpoint
+ * __dwc3_gadget_ep_disable - Disables a HW endpoint
  * @dep: the endpoint to disable
  *
  * Caller should take care of locking
  */
-static int dwc3_disable_endpoint(struct dwc3_ep *dep)
+static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 {
 	struct dwc3_gadget_ep_cmd_params params;
 
@@ -258,7 +259,8 @@ static int dwc3_disable_endpoint(struct dwc3_ep *dep)
 	int			ret = -ENOMEM;
 
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
-		WARN_ONCE(true, "%s is already disabled\n", dep->name);
+		dev_WARN_ONCE(dwc->dev, true, "%s is already disabled\n",
+				dep->name);
 		return 0;
 	}
 
@@ -300,7 +302,7 @@ static int dwc3_disable_endpoint(struct dwc3_ep *dep)
 	dep->type = 0;
 	dep->flags &= ~DWC3_EP_ENABLED;
 
-	dwc_free_trb_pool(dep);
+	dwc3_free_trb_pool(dep);
 
 	return 0;
 }
@@ -342,7 +344,7 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 	dwc = dep->dwc;
 
 	spin_lock_irqsave(&dwc->lock, flags);
-	ret = dwc3_init_endpoint(dep, desc);
+	ret = __dwc3_gadget_ep_enable(dep, desc);
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return ret;
@@ -359,7 +361,7 @@ static int dwc3_gadget_ep_disable(struct usb_ep *ep)
 
 	dep = to_dwc3_ep(ep);
 
-	return dwc3_disable_endpoint(dep);
+	return __dwc3_gadget_ep_disable(dep);
 }
 
 static struct usb_request *dwc3_gadget_ep_alloc_request(struct usb_ep *ep,
@@ -521,16 +523,6 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 	req->request.status	= -EINPROGRESS;
 	req->direction		= dep->direction;
 	req->epnum		= dep->number;
-
-	switch (usb_endpoint_type(dep->desc)) {
-	case USB_ENDPOINT_XFER_CONTROL:
-	case USB_ENDPOINT_XFER_ISOC:
-	case USB_ENDPOINT_XFER_BULK:
-	case USB_ENDPOINT_XFER_INT:
-		break;
-	default:
-		return -EINVAL;
-	}
 
 	dwc3_map_buffer_to_dma(req);
 	dwc3_gadget_add_request(dep, req);
@@ -1289,14 +1281,14 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	dwc3_update_ram_clk_sel(dwc, speed);
 
 	dep = dwc->eps[0];
-	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
 		return;
 	}
 
 	dep = dwc->eps[1];
-	ret = dwc3_init_endpoint(dep, &dwc3_gadget_ep0_desc);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enabled %s\n", dep->name);
 		return;
@@ -1532,7 +1524,7 @@ void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
 	free_irq(irq, dwc);
 
 	for (i = 0; i < ARRAY_SIZE(dwc->eps); i++)
-		dwc3_disable_endpoint(dwc->eps[i]);
+		__dwc3_gadget_ep_disable(dwc->eps[i]);
 
 	dwc3_gadget_free_endpoints(dwc);
 
