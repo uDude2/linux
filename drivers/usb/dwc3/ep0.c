@@ -2,19 +2,38 @@
  * ep0.c - DesignWare USB3 DRD Controller Endpoint 0 Handling
  *
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
+ * All rights reserved.
+ *
  * Author: Felipe Balbi <balbi@ti.com>
  *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2  of
- * the License as published by the Free Software Foundation.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions, and the following disclaimer,
+ *    without modification.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. The names of the above-listed copyright holders may not be used
+ *    to endorse or promote products derived from this software without
+ *    specific prior written permission.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * ALTERNATIVELY, this software may be distributed under the terms of the
+ * GNU General Public License ("GPL") as published by the Free Software
+ * Foundation, either version 2 of that License.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include <linux/kernel.h>
@@ -347,6 +366,169 @@ static int dwc3_ep0_handle_status(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl
 	return 0;
 }
 
+static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
+		struct usb_ctrlrequest *ctrl, int set)
+{
+	struct dwc3_ep		*dep;
+	u32			recip;
+	u32			wValue;
+	u32			wIndex;
+	int			ret;
+
+	wValue = le16_to_cpu(ctrl->wValue);
+	recip = ctrl->bRequestType & USB_RECIP_MASK;
+	switch (recip) {
+	case USB_RECIP_DEVICE:
+
+		/*
+		 * 9.4.1 says only only for SS, in AddressState only for
+		 * default control pipe
+		 */
+		switch (wValue) {
+		case USB_DEVICE_U1_ENABLE:
+		case USB_DEVICE_U2_ENABLE:
+		case USB_DEVICE_LTM_ENABLE:
+			if (dwc->dev_state != DWC3_CONFIGURED_STATE)
+				return -EINVAL;
+			if (dwc->speed != DWC3_DSTS_SUPERSPEED)
+				return -EINVAL;
+		}
+
+		/* XXX add U[12] & LTM */
+		switch (wValue) {
+		case USB_DEVICE_REMOTE_WAKEUP:
+			break;
+		case USB_DEVICE_U1_ENABLE:
+			break;
+		case USB_DEVICE_U2_ENABLE:
+			break;
+		case USB_DEVICE_LTM_ENABLE:
+			break;
+		default:
+			return -EINVAL;
+		}
+		break;
+
+	case USB_RECIP_INTERFACE:
+		switch (wValue) {
+		case USB_INTRF_FUNC_SUSPEND:
+			wIndex = le16_to_cpu(ctrl->wIndex);
+			if (wIndex & USB_INTRF_FUNC_SUSPEND_LP)
+				/* XXX enable Low power suspend */
+				;
+			if (wIndex & USB_INTRF_FUNC_SUSPEND_RW)
+				/* XXX enable remote wakeup */
+				;
+			break;
+		default:
+			return -EINVAL;
+		}
+		break;
+
+	case USB_RECIP_ENDPOINT:
+		switch (wValue) {
+		case USB_ENDPOINT_HALT:
+
+			dep =  dwc3_wIndex_to_dep(dwc, ctrl->wIndex);
+			if (!dep)
+				return -EINVAL;
+			ret = __dwc3_gadget_ep_set_halt(dep, set);
+			if (ret)
+				return -EINVAL;
+			break;
+		default:
+			return -EINVAL;
+		}
+		break;
+
+	default:
+		return -EINVAL;
+	};
+
+	dwc->ep0state = EP0_IN_WAIT_NRDY;
+	return 0;
+}
+
+static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
+{
+	int ret = 0;
+	u32 addr;
+	u32 reg;
+
+	addr = le16_to_cpu(ctrl->wValue);
+	if (addr > 127)
+		return -EINVAL;
+
+	switch (dwc->dev_state) {
+	case DWC3_DEFAULT_STATE:
+		/*
+		 * Not sure if we should program DevAddr now or later
+		 */
+		reg = dwc3_readl(dwc->device, DWC3_DCTL);
+		reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DAVADDR_MASK));
+		reg |= addr;
+		dwc3_writel(dwc->device, DWC3_DCTL, reg);
+		if (addr)
+			dwc->dev_state = DWC3_ADDRESS_STATE;
+		break;
+
+	case DWC3_ADDRESS_STATE:
+		if (!addr) {
+			dwc->dev_state = DWC3_DEFAULT_STATE;
+		} else {
+			reg = dwc3_readl(dwc->device, DWC3_DCTL);
+			reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DAVADDR_MASK));
+			reg |= addr;
+			dwc3_writel(dwc->device, DWC3_DCTL, reg);
+		}
+		break;
+
+	case DWC3_CONFIGURED_STATE:
+		ret = -EINVAL;
+		break;
+	}
+	dwc->ep0state = EP0_IN_WAIT_NRDY;
+	return ret;
+}
+
+static int dwc3_ep0_delegate_req(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
+{
+	int ret;
+
+	spin_unlock(&dwc->lock);
+	ret = dwc->gadget_driver->setup(&dwc->gadget, ctrl);
+	spin_lock(&dwc->lock);
+	return ret;
+}
+
+static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
+{
+	u32 cfg;
+	int ret;
+
+	cfg = le16_to_cpu(ctrl->wValue);
+
+	switch (dwc->dev_state) {
+	case DWC3_DEFAULT_STATE:
+		return -EINVAL;
+		break;
+
+	case DWC3_ADDRESS_STATE:
+		ret = dwc3_ep0_delegate_req(dwc, ctrl);
+		/* if the cfg matches and the cfg is non zero */
+		if (!ret && cfg)
+			dwc->dev_state = DWC3_CONFIGURED_STATE;
+		break;
+
+	case DWC3_CONFIGURED_STATE:
+		ret = dwc3_ep0_delegate_req(dwc, ctrl);
+		if (!cfg)
+			dwc->dev_state = DWC3_ADDRESS_STATE;
+		break;
+	}
+	return 0;
+}
+
 static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 {
 	int ret;
@@ -356,17 +538,19 @@ static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 		ret = dwc3_ep0_handle_status(dwc, ctrl);
 		break;
 	case USB_REQ_CLEAR_FEATURE:
+		ret = dwc3_ep0_handle_feature(dwc, ctrl, 0);
+		break;
 	case USB_REQ_SET_FEATURE:
+		ret = dwc3_ep0_handle_feature(dwc, ctrl, 1);
+		break;
 	case USB_REQ_SET_ADDRESS:
-	case USB_REQ_GET_DESCRIPTOR:
-	case USB_REQ_SET_DESCRIPTOR:
-	case USB_REQ_GET_CONFIGURATION:
+		ret = dwc3_ep0_set_address(dwc, ctrl);
+		break;
 	case USB_REQ_SET_CONFIGURATION:
-	case USB_REQ_GET_INTERFACE:
-	case USB_REQ_SET_INTERFACE:
-	case USB_REQ_SYNCH_FRAME:
+		ret = dwc3_ep0_set_config(dwc, ctrl);
+		break;
 	default:
-		ret = -EINVAL;
+		ret = dwc3_ep0_delegate_req(dwc, ctrl);
 		break;
 	};
 
@@ -400,15 +584,11 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 			dwc->ep0state = EP0_OUT_DATA_PHASE;
 	}
 
-	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD) {
+	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD)
 		ret = dwc3_ep0_std_request(dwc, ctrl);
+	else
+		ret = dwc3_ep0_delegate_req(dwc, ctrl);
 
-	} else {
-
-		spin_unlock(&dwc->lock);
-		ret = dwc->gadget_driver->setup(&dwc->gadget, ctrl);
-		spin_lock(&dwc->lock);
-	}
 	if (ret >= 0)
 		return;
 
