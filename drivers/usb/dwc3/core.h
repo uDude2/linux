@@ -4,7 +4,8 @@
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
  * All rights reserved.
  *
- * Author: Felipe Balbi <balbi@ti.com>
+ * Authors: Felipe Balbi <balbi@ti.com>,
+ *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -294,6 +295,7 @@ struct dwc3_event_buffer {
  * @endpoint: usb endpoint
  * @request_list: list of requests for this endpoint
  * @request_count: number of requests in our list
+ * @req_queued: list of requests on this ep which have TRBs setup
  * @trb_pool: array of transaction buffers
  * @free_slot: next slot which is going to be used
  * @busy_slot: first slot which is owned by HW
@@ -312,6 +314,7 @@ struct dwc3_ep {
 	struct usb_ep		endpoint;
 	struct list_head	request_list;
 	unsigned		request_count;
+	struct list_head	req_queued;
 
 	struct dwc3_trb		*trb_pool;
 	u32			free_slot;

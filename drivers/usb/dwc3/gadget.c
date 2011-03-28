@@ -4,7 +4,8 @@
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
  * All rights reserved.
  *
- * Author: Felipe Balbi <balbi@ti.com>
+ * Authors: Felipe Balbi <balbi@ti.com>,
+ *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -94,10 +95,12 @@ static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 {
 	struct dwc3			*dwc = dep->dwc;
 
-	if (req->queued)
+	if (req->queued) {
 		dep->busy_slot++;
-
-	dwc3_gadget_del_request(req);
+		list_del(&req->list);
+	} else {
+		 dwc3_gadget_del_request(req);
+	}
 
 	if (req->request.status == -EINPROGRESS)
 		req->request.status = status;
@@ -411,9 +414,18 @@ static void dwc3_gadget_ep_free_request(struct usb_ep *ep,
 	kfree(req);
 }
 
-static void dwc3_prepare_trbs(struct dwc3_ep *dep)
+/*
+ * dwc3_prepare_trbs - setup TRBs from requests
+ * @dep: endpoint for which requests are being prepared
+ * @starting: true if the endpoint is idle and no requests are queued.
+ *
+ * The functions goes through the requests list and setups TRBs for the
+ * transfers. The functions returns once there are not more TRBs available or
+ * it run out of requests.
+ */
+static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 {
-	struct dwc3_request	*req;
+	struct dwc3_request	*req, *n;
 	struct dwc3_trb		*trb;
 	struct dwc3		*dwc	= dep->dwc;
 	u32			trbs_left;
@@ -425,14 +437,17 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep)
 	req_left = dep->request_count;
 	trbs_left = (dep->busy_slot - dep->free_slot) & (DWC3_TRB_NUM - 1);
 	/*
-	 * if busy & slot are equal than it is either full or empty. Currently
-	 * we assume that it is empty as we are only called on IOC or on first
-	 * request.
+	 * if busy & slot are equal than it is either full or empty. If we are
+	 * starting to proceed requests then we are empty. Otherwise we ar
+	 * full and don't do anything
 	 */
-	if (!trbs_left)
+	if (!trbs_left) {
+		if (!starting)
+			return;
 		trbs_left = DWC3_TRB_NUM;
+	}
 
-	list_for_each_entry(req, &dep->request_list, list) {
+	list_for_each_entry_safe(req, n, &dep->request_list, list) {
 		unsigned int last_one = 0;
 
 		trb = &dep->trb_pool[dep->free_slot & (DWC3_TRB_NUM - 1)];
@@ -452,7 +467,6 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep)
 		req->queued = 1;
 
 		trb->bpl = req->request.dma;
-		trb->hwo = true;
 		trb->lst = last_one;
 		trb->chn = !last_one;
 		trb->ioc = last_one;
@@ -477,8 +491,8 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep)
 			break;
 		default:
 			/*
-			 * This is only possible with faulty memor because we
-			 * checked it allready :)
+			 * This is only possible with faulty memory because we
+			 * checked it already :)
 			 */
 			BUG();
 		}
@@ -487,6 +501,10 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep)
 
 		req->trb_dma = dma_map_single(dwc->dev, trb, sizeof(*trb),
 				DMA_BIDIRECTIONAL);
+		trb->hwo = true;
+
+		dwc3_gadget_move_request_queued(req);
+
 		if (last_one)
 			break;
 	}
@@ -500,7 +518,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	int				ret;
 	u32				cmd;
 
-	dwc3_prepare_trbs(dep);
+	dwc3_prepare_trbs(dep, true);
 	req = next_request(dep);
 
 	memset(&params, 0, sizeof(params));
@@ -527,12 +545,6 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	return 0;
 }
 
-static int __dwc3_gadget_update_transfer(struct dwc3_ep *dep)
-{
-	/* TODO */
-	return 0;
-}
-
 static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 		unsigned is_chained)
 {
@@ -546,7 +558,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 	dwc3_map_buffer_to_dma(req);
 	dwc3_gadget_add_request(dep, req);
 
-	if (!(dep->request_count == 1)) {
+	if (!(dep->request_count == 1) && !usb_endpoint_xfer_isoc(dep->desc)) {
 		dev_vdbg(dwc->dev, "%s's request_list isn't singular\n",
 				dep->name);
 		return 0;
@@ -559,7 +571,8 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
 	if (!(dep->flags & DWC3_EP_ISOC_RUNNING))
 		return 0;
 
-	return __dwc3_gadget_update_transfer(dep);
+	dwc3_prepare_trbs(dep, false);
+	return 0;
 }
 
 static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
@@ -944,6 +957,8 @@ static int __init dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 			list_add_tail(&dep->endpoint.ep_list,
 					&dwc->gadget.ep_list);
 		}
+		INIT_LIST_HEAD(&dep->request_list);
+		INIT_LIST_HEAD(&dep->req_queued);
 	}
 
 	return 0;
@@ -956,7 +971,7 @@ static void __devexit dwc3_gadget_free_endpoints(struct dwc3 *dwc)
 
 	for (epnum = 0; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
 		dep = dwc->eps[epnum];
-		if (epnum != 0)
+		if (epnum != 0 && epnum != 1)
 			list_del(&dep->endpoint.ep_list);
 		kfree(dep);
 	}
@@ -979,8 +994,7 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	int			ret;
 	unsigned int		count;
 
-	req = next_request(dep);
-
+	req = next_queued_request(dep);
 	if (!req) {
 		dev_err(dwc->dev, "no transfer to complete on %s ?\n",
 				dep->name);
@@ -1052,6 +1066,12 @@ static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 {
 	u32 uf;
 
+	if (!dep->request_count) {
+		dev_vdbg(dwc->dev, "ISOC ep %s run out for requests.\n",
+			dep->name);
+		return;
+	}
+
 	if (event_status) {
 		u32 mask;
 
@@ -1104,7 +1124,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 					dep->name);
 			return;
 		}
-		WARN_ON(dep->flags & DWC3_EP_ISOC_RUNNING);
+		dep->flags &= ~DWC3_EP_ISOC_RUNNING;
 		dwc3_gadget_start_isoc(dwc, dep, event->parameters);
 
 		break;

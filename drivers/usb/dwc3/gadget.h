@@ -4,7 +4,8 @@
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
  * All rights reserved.
  *
- * Author: Felipe Balbi <balbi@ti.com>
+ * Authors: Felipe Balbi <balbi@ti.com>,
+ *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -189,6 +190,16 @@ static inline struct dwc3_request *next_request(struct dwc3_ep *dep)
 	return list_first_entry(list, struct dwc3_request, list);
 }
 
+static inline struct dwc3_request *next_queued_request(struct dwc3_ep *dep)
+{
+	struct list_head	*list = &dep->req_queued;
+
+	if (list_empty(list))
+		return NULL;
+
+	return list_first_entry(list, struct dwc3_request, list);
+}
+
 static inline void dwc3_gadget_add_request(struct dwc3_ep *dep,
 		struct dwc3_request *req)
 {
@@ -202,6 +213,14 @@ static inline void dwc3_gadget_del_request(struct dwc3_request *req)
 
 	dep->request_count--;
 	list_del(&req->list);
+}
+
+static inline void dwc3_gadget_move_request_queued(struct dwc3_request *req)
+{
+	struct dwc3_ep		*dep = req->dep;
+
+	dep->request_count--;
+	list_move_tail(&req->list, &dep->req_queued);
 }
 
 #ifdef CONFIG_USB_GADGET_DWC3
