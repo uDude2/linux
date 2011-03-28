@@ -365,6 +365,23 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 	dep = to_dwc3_ep(ep);
 	dwc = dep->dwc;
 
+	switch (desc->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) {
+	case USB_ENDPOINT_XFER_CONTROL:
+		strncat(dep->name, "-control", 8);
+		break;
+	case USB_ENDPOINT_XFER_ISOC:
+		strncat(dep->name, "-isoc", 5);
+		break;
+	case USB_ENDPOINT_XFER_BULK:
+		strncat(dep->name, "-bulk", 5);
+		break;
+	case USB_ENDPOINT_XFER_INT:
+		strncat(dep->name, "-int", 4);
+		break;
+	default:
+		dev_err(dwc->dev, "invalid endpoint transfer type\n");
+	}
+
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep_enable(dep, desc);
 	spin_unlock_irqrestore(&dwc->lock, flags);
@@ -374,7 +391,10 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 
 static int dwc3_gadget_ep_disable(struct usb_ep *ep)
 {
-	struct dwc3_ep		*dep;
+	struct dwc3_ep			*dep;
+	struct dwc3			*dwc;
+	unsigned long			flags;
+	int				ret;
 
 	if (!ep) {
 		pr_debug("dwc3: invalid parameters\n");
@@ -383,7 +403,11 @@ static int dwc3_gadget_ep_disable(struct usb_ep *ep)
 
 	dep = to_dwc3_ep(ep);
 
-	return __dwc3_gadget_ep_disable(dep);
+	spin_lock_irqsave(&dwc->lock, flags);
+	ret = __dwc3_gadget_ep_disable(dep);
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return ret;
 }
 
 static struct usb_request *dwc3_gadget_ep_alloc_request(struct usb_ep *ep,
@@ -621,7 +645,7 @@ static int dwc3_gadget_ep_dequeue(struct usb_ep *ep,
 	}
 
 	if (r != req) {
-		dev_err(dwc->dev, "requeust %p was not queued to %s\n",
+		dev_err(dwc->dev, "request %p was not queued to %s\n",
 				request, ep->name);
 		ret = -EINVAL;
 		goto out0;
