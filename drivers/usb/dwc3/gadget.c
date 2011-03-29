@@ -97,6 +97,14 @@ static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 
 	if (req->queued) {
 		dep->busy_slot++;
+		/*
+		 * Skip LINK TRB. We can't use req->trb and check for
+		 * DWC3_TRBCTL_LINK_TRB because it points the TRB we just
+		 * completed (not the LINK TRB).
+		 */
+		if (((dep->busy_slot & DWC3_TRB_MASK) == DWC3_TRB_NUM - 1) &&
+				usb_endpoint_xfer_isoc(dep->desc))
+			dep->busy_slot++;
 		list_del(&req->list);
 	} else {
 		 dwc3_gadget_del_request(req);
@@ -140,6 +148,9 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 
 static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
 {
+	struct dwc3_trb		*trb_st;
+	struct dwc3_trb		*trb_link;
+
 	if (dep->trb_pool)
 		return 0;
 
@@ -154,6 +165,18 @@ static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
 		return -ENOMEM;
 	}
 
+	if (!usb_endpoint_xfer_isoc(dep->desc))
+		return 0;
+
+	/* Link TRB for ISOC. The HWO but is never reset */
+	trb_st = &dep->trb_pool[0];
+	trb_link = &dep->trb_pool[DWC3_TRB_NUM - 1];
+	trb_link->trbctl = DWC3_TRBCTL_LINK_TRB;
+	trb_link->hwo = true;
+	dwc3_set_dmaddr(trb_link, virt_to_phys(trb_st));
+
+	dma_sync_single_for_device(dep->dwc->dev, virt_to_phys(trb_link),
+			sizeof(*trb_link), DMA_TO_DEVICE);
 	return 0;
 }
 
@@ -459,7 +482,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 
 	/* the first request must not be queued */
 	req_left = dep->request_count;
-	trbs_left = (dep->busy_slot - dep->free_slot) & (DWC3_TRB_NUM - 1);
+	trbs_left = (dep->busy_slot - dep->free_slot) & DWC3_TRB_MASK;
 	/*
 	 * if busy & slot are equal than it is either full or empty. If we are
 	 * starting to proceed requests then we are empty. Otherwise we ar
@@ -469,13 +492,43 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		if (!starting)
 			return;
 		trbs_left = DWC3_TRB_NUM;
+		/*
+		 * In case we start from scratch, we queue the ISOC requests
+		 * starting from slot 1. This is done because we use ring
+		 * buffer and have no LST bit to stop us. Instead, we place
+		 * IOC bit TRB_NUM/4. We try to avoid to having an interrupt
+		 * after the first request so we start at slot 1 and have
+		 * 7 requests proceed before we hit the first IOC.
+		 * Other transfer types don't use the ring buffer and are
+		 * processed from the first TRB until the last one. Since we
+		 * don't wrap around we have to start at the beginning.
+		 */
+		if (usb_endpoint_xfer_isoc(dep->desc)) {
+			dep->busy_slot = 1;
+			dep->free_slot = 1;
+		} else {
+			dep->busy_slot = 0;
+			dep->free_slot = 0;
+		}
 	}
+
+	/* The last TRB is a link TRB, not used for xfer */
+	if ((trbs_left <= 1) && usb_endpoint_xfer_isoc(dep->desc))
+		return;
 
 	list_for_each_entry_safe(req, n, &dep->request_list, list) {
 		unsigned int last_one = 0;
+		unsigned int cur_slot;
 
-		trb = &dep->trb_pool[dep->free_slot & (DWC3_TRB_NUM - 1)];
+		trb = &dep->trb_pool[dep->free_slot & DWC3_TRB_MASK];
+		cur_slot = dep->free_slot;
 		dep->free_slot++;
+
+		/* Skip the LINK-TRB on ISOC */
+		if (((cur_slot & DWC3_TRB_MASK) == DWC3_TRB_NUM - 1) &&
+				usb_endpoint_xfer_isoc(dep->desc))
+			continue;
+
 		memset(trb, 0, sizeof(*trb));
 		trbs_left--;
 		req_left--;
@@ -490,14 +543,16 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		req->trb = trb;
 		req->queued = 1;
 
-		trb->bpl = req->request.dma;
-		trb->lst = last_one;
-		trb->chn = !last_one;
-		trb->ioc = last_one;
+		dwc3_set_dmaddr(trb, req->request.dma);
 
 		if (usb_endpoint_xfer_isoc(dep->desc)) {
 			trb->isp_imi = true;
 			trb->csp = true;
+			trb->chn = true;
+		} else {
+			trb->lst = last_one;
+			trb->ioc = last_one;
+			trb->chn = !last_one;
 		}
 
 		switch (usb_endpoint_type(dep->desc)) {
@@ -507,6 +562,10 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 
 		case USB_ENDPOINT_XFER_ISOC:
 			trb->trbctl = DWC3_TRBCTL_ISOCHRONOUS;
+
+			/* IOC every DWC3_TRB_NUM / 4 so we can refill */
+			if (!(cur_slot % (DWC3_TRB_NUM / 4)))
+				trb->ioc = last_one;
 			break;
 
 		case USB_ENDPOINT_XFER_BULK:
@@ -543,11 +602,13 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	u32				cmd;
 
 	dwc3_prepare_trbs(dep, true);
-	req = next_request(&dep->request_list);
+	req = next_request(&dep->req_queued);
 
 	memset(&params, 0, sizeof(params));
-	params.param0.depstrtxfer.transfer_desc_addr_high = 0;
-	params.param1.depstrtxfer.transfer_desc_addr_low = req->trb_dma;
+	params.param0.depstrtxfer.transfer_desc_addr_high =
+		upper_32_bits(req->trb_dma);
+	params.param1.depstrtxfer.transfer_desc_addr_low =
+		lower_32_bits(req->trb_dma);
 
 	cmd = DWC3_DEPCMD_STARTTRANSFER | DWC3_DEPCMD_PARAM(cmd_param);
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
@@ -645,6 +706,15 @@ static int dwc3_gadget_ep_dequeue(struct usb_ep *ep,
 	}
 
 	if (r != req) {
+		list_for_each_entry(r, &dep->req_queued, list) {
+			if (r == req)
+				break;
+		}
+		if (r == req) {
+			ret = -EBUSY;
+			/* wait until it is processed */
+			goto out0;
+		}
 		dev_err(dwc->dev, "request %p was not queued to %s\n",
 				request, ep->name);
 		ret = -EINVAL;
