@@ -121,7 +121,7 @@ struct dwc3_gadget_ep_depcfg_param0 {
  */
 struct dwc3_gadget_ep_depxfercfg_param0 {
 	u32		number_xfer_resources:16;
-	u32		reserved16_31:16
+	u32		reserved16_31:16;
 } __packed;
 
 /**
@@ -171,7 +171,7 @@ struct dwc3_request {
 	struct dwc3_ep		*dep;
 
 	u8			epnum;
-	struct dwc3_trb		*trb;
+	struct dwc3_trb_hw	*trb;
 	dma_addr_t		trb_dma;
 
 	unsigned		direction:1;
