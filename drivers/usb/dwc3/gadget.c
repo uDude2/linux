@@ -127,7 +127,7 @@ static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 		unsigned cmd, struct dwc3_gadget_ep_cmd_params *params)
 {
-	unsigned long		timeout = jiffies + msecs_to_jiffies(500);
+	unsigned long		timeout = 500;
 	u32			reg;
 
 	dwc3_writel(dwc->device, DWC3_DEPCMDPAR0(ep), params->param0.raw);
@@ -137,13 +137,20 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	dwc3_writel(dwc->device, DWC3_DEPCMD(ep), cmd | DWC3_DEPCMD_CMDACT);
 	do {
 		reg = dwc3_readl(dwc->device, DWC3_DEPCMD(ep));
-		if (time_after(jiffies, timeout))
+		if (!(reg & DWC3_DEPCMD_CMDACT))
+			return 0;
+
+		/*
+		 * XXX Figure out a sane timeout here. 500ms is way too much.
+		 * We can't sleep here, because it is also called from
+		 * interrupt context.
+		 */
+		timeout--;
+		if (!timeout)
 			return -ETIMEDOUT;
 
-		cpu_relax();
-	} while (!(reg & DWC3_DEPCMD_CMDACT));
-
-	return 0;
+		mdelay(1);
+	} while (1);
 }
 
 static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
@@ -229,9 +236,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		goto err1;
 	}
 
-	params.param0.depcfg.ep_type = desc->bmAttributes &
-		USB_ENDPOINT_XFERTYPE_MASK;
-
+	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
 	params.param0.depcfg.ignore_sequence_number = true;
 	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
 
@@ -394,7 +399,7 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 	dep = to_dwc3_ep(ep);
 	dwc = dep->dwc;
 
-	switch (desc->bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) {
+	switch (usb_endpoint_type(desc)) {
 	case USB_ENDPOINT_XFER_CONTROL:
 		strncat(dep->name, "-control", 8);
 		break;
@@ -635,8 +640,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	return 0;
 }
 
-static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req,
-		unsigned is_chained)
+static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 {
 	struct dwc3		*dwc = dep->dwc;
 
@@ -685,7 +689,7 @@ static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
 	dev_vdbg(dwc->dev, "queing request %p to %s\n", request, ep->name);
 
 	spin_lock_irqsave(&dwc->lock, flags);
-	ret = __dwc3_gadget_ep_queue(dep, req, 0);
+	ret = __dwc3_gadget_ep_queue(dep, req);
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return ret;
@@ -801,28 +805,6 @@ static int dwc3_gadget_ep_set_wedge(struct usb_ep *ep)
 	return usb_ep_set_halt(ep);
 }
 
-static void dwc3_gadget_ep_fifo_flush(struct usb_ep *ep)
-{
-	struct dwc3_ep			*dep = to_dwc3_ep(ep);
-	struct dwc3			*dwc = dep->dwc;
-
-	unsigned long			flags;
-	unsigned			reg;
-
-	spin_lock_irqsave(&dwc->lock, flags);
-
-	reg = dep->number;
-	reg |= ((dep->number & 1) << 5);
-
-	dwc3_writel(dwc->global, DWC3_DGCMDPAR, reg);
-
-	reg = DWC3_DGCMD_SELECTED_FIFO_FLUSH;
-
-	dwc3_writel(dwc->global, DWC3_DGCMD, reg);
-
-	spin_unlock_irqrestore(&dwc->lock, flags);
-}
-
 /* -------------------------------------------------------------------------- */
 
 static const struct usb_endpoint_descriptor dwc3_gadget_ep0_desc = {
@@ -843,7 +825,6 @@ static const struct usb_ep_ops dwc3_gadget_ep0_ops = {
 	.dequeue	= dwc3_gadget_ep_dequeue,
 	.set_halt	= dwc3_gadget_ep_set_halt,
 	.set_wedge	= dwc3_gadget_ep_set_wedge,
-	.fifo_flush	= dwc3_gadget_ep_fifo_flush,
 };
 
 static const struct usb_ep_ops dwc3_gadget_ep_ops = {
@@ -855,7 +836,6 @@ static const struct usb_ep_ops dwc3_gadget_ep_ops = {
 	.dequeue	= dwc3_gadget_ep_dequeue,
 	.set_halt	= dwc3_gadget_ep_set_halt,
 	.set_wedge	= dwc3_gadget_ep_set_wedge,
-	.fifo_flush	= dwc3_gadget_ep_fifo_flush,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -863,13 +843,9 @@ static const struct usb_ep_ops dwc3_gadget_ep_ops = {
 static int dwc3_gadget_get_frame(struct usb_gadget *g)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
-	unsigned long		flags;
 	u32			reg;
 
-	spin_lock_irqsave(&dwc->lock, flags);
 	reg = dwc3_readl(dwc->device, DWC3_DSTS);
-	spin_unlock_irqrestore(&dwc->lock, flags);
-
 	return DWC3_DSTS_SOFFN(reg);
 }
 
@@ -968,7 +944,7 @@ static int dwc3_gadget_set_selfpowered(struct usb_gadget *g,
 static void dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on)
 {
 	u32			reg;
-	unsigned long timeout;
+	unsigned long		timeout = 500;
 
 	reg = dwc3_readl(dwc->device, DWC3_DCTL);
 	if (is_on)
@@ -978,7 +954,6 @@ static void dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on)
 
 	dwc3_writel(dwc->device, DWC3_DCTL, reg);
 
-	timeout = jiffies + msecs_to_jiffies(500);
 	do {
 		reg = dwc3_readl(dwc->device, DWC3_DSTS);
 		if (is_on) {
@@ -988,9 +963,13 @@ static void dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on)
 			if (reg & DWC3_DSTS_DEVCTRLHLT)
 				break;
 		}
-		cpu_relax();
-		if (time_after(jiffies, timeout))
+		/*
+		 * XXX reduce the 500ms delay
+		 */
+		timeout--;
+		if (!timeout)
 			break;
+		mdelay(1);
 	} while (1);
 
 	dev_vdbg(dwc->dev, "gadget %s data soft-%s\n",
@@ -1561,11 +1540,10 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3 *dwc, u32 buf)
 static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 {
 	struct dwc3			*dwc = _dwc;
-	unsigned long			flags;
 	int				i;
 	irqreturn_t			ret = IRQ_NONE;
 
-	spin_lock_irqsave(&dwc->lock, flags);
+	spin_lock(&dwc->lock);
 
 	for (i = 0; i < DWC3_EVENT_BUFFERS_NUM; i++) {
 		irqreturn_t status;
@@ -1575,7 +1553,7 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 			ret = status;
 	}
 
-	spin_unlock_irqrestore(&dwc->lock, flags);
+	spin_unlock(&dwc->lock);
 
 	return ret;
 }
@@ -1603,10 +1581,6 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dwc->gadget.name		= "dwc3-gadget";
 
 	the_dwc				= dwc;
-
-	/* flush all fifos */
-	reg = DWC3_DGCMD_ALL_FIFO_FLUSH;
-	dwc3_writel(dwc->global, DWC3_DGCMD, reg);
 
 	/*
 	 * REVISIT: Here we should clear all pending IRQs to be
