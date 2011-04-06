@@ -488,10 +488,7 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
  * @event_buffer_list: a list of event buffers
  * @gadget: device side representation of the peripheral controller
  * @gadget_driver: pointer to the gadget driver
- * @xhci: xHCI memory base
- * @global: global registers
- * @device: device registers
- * @otg: OTG registers
+ * @regs: base address for our registers
  * @irq: IRQ number
  * @revision: revision register contents
  * @is_selfpowered: true when we are selfpowered
@@ -520,10 +517,7 @@ struct dwc3 {
 	struct usb_gadget	gadget;
 	struct usb_gadget_driver *gadget_driver;
 
-	void __iomem		*xhci;
-	void __iomem		*global;
-	void __iomem		*device;
-	void __iomem		*otg;
+	void __iomem		*regs;
 
 	int			irq;
 
@@ -660,5 +654,13 @@ union dwc3_event {
 	struct dwc3_event_devt		devt;
 	struct dwc3_event_gevt		gevt;
 };
+
+/*
+ * DWC3 Features to be used as Driver Data
+ */
+
+#define DWC3_HAS_PERIPHERAL		BIT(0)
+#define DWC3_HAS_XHCI			BIT(1)
+#define DWC3_HAS_OTG			BIT(3)
 
 #endif /* __DRIVERS_USB_DWC3_CORE_H */
