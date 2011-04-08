@@ -39,7 +39,6 @@
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include <linux/spinlock.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
 
@@ -48,8 +47,6 @@
 #define PCI_DEVICE_ID_SYNOPSYS_HAPSUSB3	0xabcd
 
 struct dwc3_haps {
-	/* device lock */
-	spinlock_t		lock;
 	struct device		*dev;
 	struct platform_device	*dwc3;
 };
@@ -82,6 +79,13 @@ static int __devinit dwc3_haps_probe(struct pci_dev *pci,
 		goto err2;
 	}
 
+	/*
+	 * REVISIT update the resourc name to what the core driver expects
+	 * otherwise we won't probe correctly. Is there a better way to
+	 * achieve this with PCI ?
+	 */
+	pci->resource[0].name = "dwc_usb3";
+
 	ret = platform_device_add_resources(dwc3, pci->resource,
 			PCI_NUM_RESOURCES);
 	if (ret) {
@@ -89,7 +93,6 @@ static int __devinit dwc3_haps_probe(struct pci_dev *pci,
 		goto err3;
 	}
 
-	spin_lock_init(&haps->lock);
 	pci_set_drvdata(pci, haps);
 
 	dwc3->dev.parent = &pci->dev;

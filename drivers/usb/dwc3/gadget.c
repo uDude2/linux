@@ -210,11 +210,9 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		const struct usb_endpoint_descriptor *desc)
 {
 	struct dwc3_gadget_ep_cmd_params params;
-
 	struct dwc3		*dwc = dep->dwc;
-
 	u32			reg;
-
+	u32			cmd;
 	int			ret = -ENOMEM;
 
 	if (dep->flags & DWC3_EP_ENABLED) {
@@ -228,12 +226,18 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 
 	memset(&params, 0x00, sizeof(params));
 
-	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
-			DWC3_DEPCMD_DEPSTARTCFG, &params);
-	if (ret) {
-		dev_err(dwc->dev, "failed to start new configuration for %s\n",
-				dep->name);
-		goto err1;
+	if (dep->number != 1) {
+		cmd = DWC3_DEPCMD_DEPSTARTCFG;
+		/* XferRscIdx == 0 for ep0 and 2 for the remaining */
+		if (dep->number > 1)
+			cmd |= DWC3_DEPCMD_PARAM(2);
+
+		ret = dwc3_send_gadget_ep_cmd(dwc, 0, cmd, &params);
+		if (ret) {
+			dev_err(dwc->dev, "failed to start new configuration for %s\n",
+					dep->name);
+			goto err1;
+		}
 	}
 
 	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
@@ -262,8 +266,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		dep->interval = 1 << (desc->bInterval - 1);
 	}
 
-	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
-			DWC3_DEPCMD_SETEPCONFIG, &params);
+	ret = dwc3_send_gadget_ep_cmd(dwc, 1, DWC3_DEPCMD_SETEPCONFIG, &params);
 	if (ret) {
 		dev_err(dwc->dev, "failed to configure %s\n", dep->name);
 		goto err1;
@@ -1599,9 +1602,16 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 
 	dwc3_writel(dwc->regs, DWC3_DCFG, DWC3_DCFG_SUPERSPEED);
 
-	/* Disable Start and End of Frame IRQs */
-	reg = dwc3_readl(dwc->regs, DWC3_DEVTEN);
-	reg &= ~(DWC3_DEVTEN_SOFEN | DWC3_DEVTEN_EOPFEN);
+	/* Enable all but Start and End of Frame IRQs */
+	reg = (DWC3_DEVTEN_VNDRDEVTSTRCVEDEN |
+			DWC3_DEVTEN_EVNTOVERFLOWEN |
+			DWC3_DEVTEN_CMDCMPLTEN |
+			DWC3_DEVTEN_ERRTICERREN |
+			DWC3_DEVTEN_WKUPEVTEN |
+			DWC3_DEVTEN_ULSTCNGEN |
+			DWC3_DEVTEN_CONNECTDONEEN |
+			DWC3_DEVTEN_USBRSTEN |
+			DWC3_DEVTEN_DISCONNEVTEN);
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
 
 	ret = dwc3_gadget_init_endpoints(dwc);

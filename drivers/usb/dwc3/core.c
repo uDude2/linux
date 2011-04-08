@@ -229,6 +229,8 @@ static int __devinit dwc3_core_init(struct dwc3 *dwc)
 
 	do {
 		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+		if (!(reg & DWC3_DCTL_CSFTRST))
+			break;
 
 		if (time_after(jiffies, timeout)) {
 			dev_err(dwc->dev, "Reset Timed Out\n");
@@ -237,7 +239,7 @@ static int __devinit dwc3_core_init(struct dwc3 *dwc)
 		}
 
 		cpu_relax();
-	} while (reg & DWC3_DCTL_CSFTRST);
+	} while (true);
 
 	ret = dwc3_alloc_event_buffers(dwc, DWC3_EVENT_BUFFERS_NUM,
 			DWC3_EVENT_BUFFERS_SIZE);
@@ -293,7 +295,7 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	dwc = PTR_ALIGN(mem, DWC3_ALIGN_MASK + 1);
 	dwc->mem = mem;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dwc_usb3");
 	if (!res) {
 		dev_err(&pdev->dev, "missing resource\n");
 		goto err1;
@@ -368,7 +370,7 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct platform_device_id dwc3_id_table[] = {
+static const struct platform_device_id dwc3_id_table[] __devinitconst = {
 	{
 		.name	= "omap-dwc3",
 		.driver_data = (DWC3_HAS_PERIPHERAL
