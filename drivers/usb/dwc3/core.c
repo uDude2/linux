@@ -54,6 +54,8 @@
 #include "gadget.h"
 #include "io.h"
 
+#include "debug.h"
+
 #ifdef CONFIG_PM
 static int dwc3_suspend(struct device *dev)
 {
@@ -307,7 +309,7 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 		goto err1;
 	}
 
-	irq = platform_get_irq(pdev, 0);
+	irq = platform_get_irq_byname(pdev, "dwc_usb3");
 	if (irq < 0) {
 		dev_err(&pdev->dev, "missing IRQ\n");
 		goto err2;
@@ -317,6 +319,7 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, dwc);
 
 	dwc->regs	= regs;
+	dwc->regs_size	= resource_size(res);
 	dwc->dev	= &pdev->dev;
 	dwc->irq	= irq;
 
@@ -334,9 +337,19 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 		}
 	}
 
+	ret = dwc3_debugfs_init(dwc);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to initialize debugfs\n");
+		goto err4;
+	}
+
 	pm_runtime_allow(&pdev->dev);
 
 	return 0;
+
+err4:
+	if (features & DWC3_HAS_PERIPHERAL)
+		dwc3_gadget_exit(dwc);
 
 err3:
 	dwc3_core_exit(dwc);
@@ -360,6 +373,8 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 	pm_runtime_put(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 
+	dwc3_debugfs_exit(dwc);
+
 	if (features & DWC3_HAS_PERIPHERAL)
 		dwc3_gadget_exit(dwc);
 
@@ -372,13 +387,13 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 
 static const struct platform_device_id dwc3_id_table[] __devinitconst = {
 	{
-		.name	= "omap-dwc3",
+		.name	= "dwc3-omap",
 		.driver_data = (DWC3_HAS_PERIPHERAL
 			| DWC3_HAS_XHCI
 			| DWC3_HAS_OTG),
 	},
 	{
-		.name	= "haps-dwc3",
+		.name	= "dwc3-haps",
 		.driver_data = DWC3_HAS_PERIPHERAL,
 	},
 	{  },	/* Terminating Entry */

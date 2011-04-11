@@ -1,5 +1,5 @@
 /**
- * io.h - DesignWare USB3 DRD IO Header
+ * debug.h - DesignWare USB3 DRD Controller Debug Header
  *
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
  * All rights reserved.
@@ -37,19 +37,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __DRIVERS_USB_DWC3_IO_H
-#define __DRIVERS_USB_DWC3_IO_H
+#include "core.h"
 
-#include <asm/io.h>
+#ifdef CONFIG_DEBUG_FS
+extern int dwc3_debugfs_init(struct dwc3 *);
+extern void dwc3_debugfs_exit(struct dwc3 *);
+#else
+static inline int dwc3_debugfs_init(struct dwc3 *d)
+{  return 0;  }
+static inline void dwc3_debugfs_exit(struct dwc3 *d)
+{  }
+#endif
 
-static inline u32 dwc3_readl(void __iomem *base, u32 offset)
-{
-	return readl(base + offset);
-}
-
-static inline void dwc3_writel(void __iomem *base, u32 offset, u32 value)
-{
-	writel(value, base + offset);
-}
-
-#endif /* __DRIVERS_USB_DWC3_IO_H */

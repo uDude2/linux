@@ -45,6 +45,7 @@
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
 #include <linux/mm.h>
+#include <linux/debugfs.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -131,10 +132,10 @@
 #define DWC3_DGCMDPAR		0xc710
 #define DWC3_DGCMD		0xc714
 #define DWC3_DALEPENA		0xc720
-#define DWC3_DEPCMDPAR2(n)	(0xc800 + (n * 0x04))
-#define DWC3_DEPCMDPAR1(n)	(0xc804 + (n * 0x04))
-#define DWC3_DEPCMDPAR0(n)	(0xc808 + (n * 0x04))
-#define DWC3_DEPCMD(n)		(0xc80c + (n * 0x04))
+#define DWC3_DEPCMDPAR2(n)	(0xc800 + (n * 0x10))
+#define DWC3_DEPCMDPAR1(n)	(0xc804 + (n * 0x10))
+#define DWC3_DEPCMDPAR0(n)	(0xc808 + (n * 0x10))
+#define DWC3_DEPCMD(n)		(0xc80c + (n * 0x10))
 
 /* OTG Registers */
 #define DWC3_OCFG		0xcc00
@@ -488,6 +489,7 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
  * @gadget: device side representation of the peripheral controller
  * @gadget_driver: pointer to the gadget driver
  * @regs: base address for our registers
+ * @regs_size: address space size
  * @irq: IRQ number
  * @revision: revision register contents
  * @is_selfpowered: true when we are selfpowered
@@ -497,6 +499,7 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
  * @link_state: link state
  * @speed: device speed (super, high, full, low)
  * @mem: ponts to start of memory which is used for this struct.
+ * @root: debugfs root folder pointer
  */
 struct dwc3 {
 	struct usb_ctrlrequest	ctrl_req __aligned(16);
@@ -517,6 +520,7 @@ struct dwc3 {
 	struct usb_gadget_driver *gadget_driver;
 
 	void __iomem		*regs;
+	size_t			regs_size;
 
 	int			irq;
 
@@ -532,6 +536,8 @@ struct dwc3 {
 
 	u8			speed;
 	void			*mem;
+
+	struct dentry		*root;
 };
 
 /* -------------------------------------------------------------------------- */
