@@ -124,11 +124,41 @@ static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 			req->request.length, status);
 }
 
+static const char *dwc3_gadget_ep_cmd_string(u8 cmd)
+{
+	switch (cmd) {
+	case DWC3_DEPCMD_DEPSTARTCFG:
+		return "Start New Configuration";
+	case DWC3_DEPCMD_ENDTRANSFER:
+		return "End Transfer";
+	case DWC3_DEPCMD_UPDATETRANSFER:
+		return "Update Transfer";
+	case DWC3_DEPCMD_STARTTRANSFER:
+		return "Start Transfer";
+	case DWC3_DEPCMD_CLEARSTALL:
+		return "Clear Stall";
+	case DWC3_DEPCMD_SETSTALL:
+		return "Set Stall";
+	case DWC3_DEPCMD_GETSEQNUMBER:
+		return "Get Data Sequence Number";
+	case DWC3_DEPCMD_SETTRANSFRESOURCE:
+		return "Set Endpoint Transfer Resource";
+	case DWC3_DEPCMD_SETEPCONFIG:
+		return "Set Endpoint Configuration";
+	default:
+		return "UNKNOWN command";
+	}
+}
+
 int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 		unsigned cmd, struct dwc3_gadget_ep_cmd_params *params)
 {
 	unsigned long		timeout = 500;
 	u32			reg;
+
+	dev_vdbg(dwc->dev, "Sending '%s' with parameters %08x %08x %08x\n",
+			dwc3_gadget_ep_cmd_string(cmd), params->param0.raw,
+			params->param1.raw, params->param2.raw);
 
 	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR0(ep), params->param0.raw);
 	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR1(ep), params->param1.raw);
@@ -207,22 +237,14 @@ static void dwc3_free_trb_pool(struct dwc3_ep *dep)
  * Caller should take care of locking
  */
 static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
-		const struct usb_endpoint_descriptor *desc)
+		const struct usb_endpoint_descriptor *desc,
+		bool ignore_sequence_number)
 {
 	struct dwc3_gadget_ep_cmd_params params;
 	struct dwc3		*dwc = dep->dwc;
 	u32			reg;
 	u32			cmd;
 	int			ret = -ENOMEM;
-
-	if (dep->flags & DWC3_EP_ENABLED) {
-		dev_WARN_ONCE(dwc->dev, true, "%s is already enabled\n",
-				dep->name);
-		return 0;
-	}
-
-	if (dwc3_alloc_trb_pool(dep))
-		goto err0;
 
 	memset(&params, 0x00, sizeof(params));
 
@@ -241,7 +263,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	}
 
 	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
-	params.param0.depcfg.ignore_sequence_number = true;
+	params.param0.depcfg.ignore_sequence_number = ignore_sequence_number;
 	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
 
 	params.param1.depcfg.xfer_complete_enable = true;
@@ -318,12 +340,6 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 	u32			reg;
 
 	int			ret = -ENOMEM;
-
-	if (!(dep->flags & DWC3_EP_ENABLED)) {
-		dev_WARN_ONCE(dwc->dev, true, "%s is already disabled\n",
-				dep->name);
-		return 0;
-	}
 
 	memset(&params, 0x00, sizeof(params));
 
@@ -421,8 +437,20 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 		dev_err(dwc->dev, "invalid endpoint transfer type\n");
 	}
 
+	if (dep->flags & DWC3_EP_ENABLED) {
+		dev_WARN_ONCE(dwc->dev, true, "%s is already enabled\n",
+				dep->name);
+		return 0;
+	}
+
+	ret = dwc3_alloc_trb_pool(dep);
+	if (ret) {
+		dev_err(dwc->dev, "failed to allocate TRB pool\n");
+		return ret;
+	}
+
 	spin_lock_irqsave(&dwc->lock, flags);
-	ret = __dwc3_gadget_ep_enable(dep, desc);
+	ret = __dwc3_gadget_ep_enable(dep, desc, true);
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return ret;
@@ -442,6 +470,13 @@ static int dwc3_gadget_ep_disable(struct usb_ep *ep)
 
 	dep = to_dwc3_ep(ep);
 	dwc = dep->dwc;
+
+	if (!(dep->flags & DWC3_EP_ENABLED)) {
+		dev_WARN_ONCE(dwc->dev, true, "%s is already disabled\n",
+				dep->name);
+		return 0;
+	}
+
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep_disable(dep);
 	spin_unlock_irqrestore(&dwc->lock, flags);
@@ -812,12 +847,12 @@ static int dwc3_gadget_ep_set_wedge(struct usb_ep *ep)
 
 /* -------------------------------------------------------------------------- */
 
-static const struct usb_endpoint_descriptor dwc3_gadget_ep0_desc = {
+static struct usb_endpoint_descriptor dwc3_gadget_ep0_desc = {
 	.bLength	= USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
 	.bEndpointAddress = 0,
 	.bmAttributes	= USB_ENDPOINT_XFER_CONTROL,
-	.wMaxPacketSize	= 512,	/* using SuperSpeed as default */
+	.wMaxPacketSize	= -EINVAL,	/* Fixed up later */
 };
 
 static const struct usb_ep_ops dwc3_gadget_ep0_ops = {
@@ -1387,6 +1422,8 @@ static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
 static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 {
 	struct dwc3_gadget_ep_cmd_params params;
+	struct dwc3_ep		*dep;
+	int			ret;
 	u32			reg;
 	u8			speed;
 
@@ -1400,6 +1437,33 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	dwc->speed = speed;
 
 	dwc3_update_ram_clk_sel(dwc, speed);
+
+	switch (speed) {
+	case DWC3_DCFG_SUPERSPEED:
+		dwc3_gadget_ep0_desc.wMaxPacketSize = 512;
+		break;
+	case DWC3_DCFG_HIGHSPEED:
+	case DWC3_DCFG_FULLSPEED2:
+	case DWC3_DCFG_FULLSPEED1:
+		dwc3_gadget_ep0_desc.wMaxPacketSize = 64;
+	case DWC3_DCFG_LOWSPEED:
+		dwc3_gadget_ep0_desc.wMaxPacketSize = 8;
+		break;
+	}
+
+	dep = dwc->eps[0];
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, true);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
+		return;
+	}
+
+	dep = dwc->eps[1];
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, true);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
+		return;
+	}
 
 	/*
 	 * Configure PHY via GUSB3PIPECTLn if required.
@@ -1593,15 +1657,18 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	/* begin to receive SETUP packets */
 	dwc3_ep0_out_start(dwc);
 
+	/* Start with SuperSpeed Default */
+	dwc3_gadget_ep0_desc.wMaxPacketSize = 512;
+
 	dep = dwc->eps[0];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, false);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
 		goto err2;
 	}
 
 	dep = dwc->eps[1];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, false);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
 		goto err3;
