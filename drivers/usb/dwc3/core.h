@@ -252,8 +252,8 @@
 #define DWC3_DEPCMD_SETTRANSFRESOURCE	(0x02 << 0)
 #define DWC3_DEPCMD_SETEPCONFIG		(0x01 << 0)
 
-#define DWC3_DALEPENA_EPOUT(n)		(1 << n)
-#define DWC3_DALEPENA_EPIN(n)		(1 << (n + 1))
+/* The EP number goes 0..31 so ep0 is always out and ep1 is always in */
+#define DWC3_DALEPENA_EP(n)		(1 << n)
 
 #define DWC3_DEPCMD_TYPE_CONTROL	0
 #define DWC3_DEPCMD_TYPE_ISOC		1
@@ -498,16 +498,16 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
  * @ep0state: state of endpoint zero
  * @link_state: link state
  * @speed: device speed (super, high, full, low)
- * @mem: ponts to start of memory which is used for this struct.
+ * @mem: points to start of memory which is used for this struct.
  * @root: debugfs root folder pointer
  */
 struct dwc3 {
-	struct usb_ctrlrequest	ctrl_req __aligned(16);
-	struct dwc3_trb_hw	ep0_trb __aligned(16);
-	u8			setup_buf[2] __aligned(16);
+	struct usb_ctrlrequest	*ctrl_req;
+	struct dwc3_trb_hw	*ep0_trb;
+	u8			*setup_buf;
 	dma_addr_t		ctrl_req_addr;
 	dma_addr_t		ep0_trb_addr;
-	dma_addr_t		setup_buf_addr;;
+	dma_addr_t		setup_buf_addr;
 	struct usb_request	ep0_usb_req;
 	/* device lock */
 	spinlock_t		lock;

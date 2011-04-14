@@ -258,7 +258,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		if (ret) {
 			dev_err(dwc->dev, "failed to start new configuration for %s\n",
 					dep->name);
-			goto err1;
+			goto err0;
 		}
 	}
 
@@ -290,10 +290,11 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		}
 	}
 
-	ret = dwc3_send_gadget_ep_cmd(dwc, 1, DWC3_DEPCMD_SETEPCONFIG, &params);
+	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+			DWC3_DEPCMD_SETEPCONFIG, &params);
 	if (ret) {
 		dev_err(dwc->dev, "failed to configure %s\n", dep->name);
-		goto err1;
+		goto err0;
 	}
 
 	memset(&params, 0x00, sizeof(params));
@@ -301,7 +302,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_SETTRANSFRESOURCE, &params);
 	if (ret)
-		goto err1;
+		goto err0;
 
 	dep->desc = desc;
 	dep->type = usb_endpoint_type(desc);
@@ -310,18 +311,17 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 
 	if (usb_endpoint_dir_in(dep->desc))
-		reg |= DWC3_DALEPENA_EPIN(dep->number);
+		reg |= DWC3_DALEPENA_EP(dep->number);
 	else
-		reg |= DWC3_DALEPENA_EPOUT(dep->number);
+		reg |= DWC3_DALEPENA_EP(dep->number);
 
 	dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
 
 	return 0;
 
-err1:
+err0:
 	dwc3_free_trb_pool(dep);
 
-err0:
 	return ret;
 }
 
@@ -369,9 +369,9 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 
 	if (usb_endpoint_dir_in(dep->desc))
-		reg &= ~DWC3_DALEPENA_EPIN(dep->number);
+		reg &= ~DWC3_DALEPENA_EP(dep->number);
 	else
-		reg &= ~DWC3_DALEPENA_EPOUT(dep->number);
+		reg &= ~DWC3_DALEPENA_EP(dep->number);
 
 	dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
 
@@ -1070,7 +1070,7 @@ static int __init dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 		} else {
 			dep->endpoint.maxpacket = 512;
 			dep->endpoint.ops = &dwc3_gadget_ep_ops;
-			dep->direction = (epnum % 2) ? true : false;
+			dep->direction = (epnum & 1) ? true : false;
 			list_add_tail(&dep->endpoint.ep_list,
 					&dwc->gadget.ep_list);
 		}
@@ -1347,8 +1347,6 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 #endif
 	dwc3_disconnect_gadget(dwc);
 	dwc3_stop_active_transfers(dwc);
-
-	dwc3_gadget_run_stop(dwc, 0);
 }
 
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
@@ -1365,12 +1363,6 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 	reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DAVADDR_MASK));
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
-
-	/* The following could be part of dwc3_stop_active_transfers() on EP0 */
-	/* Enable ep0 in DALEPENA register */
-	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
-	reg |= DWC3_DALEPENA_EPOUT(0) | DWC3_DALEPENA_EPIN(0);
-	dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
 
 	/*
 	 * Wait for RxFifo to drain
@@ -1581,9 +1573,9 @@ static irqreturn_t dwc3_process_event_buf(struct dwc3 *dwc, u32 buf)
 		 */
 		evt->lpos = (evt->lpos + 4) % DWC3_EVENT_BUFFERS_SIZE;
 		left -= 4;
-	}
 
-	dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(buf), count);
+		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(buf), 4);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1622,6 +1614,31 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	int					ret;
 	int					irq;
 
+	dwc->ctrl_req = dma_alloc_coherent(dwc->dev, sizeof(*dwc->ctrl_req),
+			&dwc->ctrl_req_addr, GFP_KERNEL);
+	if (!dwc->ctrl_req) {
+		dev_err(dwc->dev, "failed to allocate ctrl request\n");
+		ret = -ENOMEM;
+		goto err0;
+	}
+
+	dwc->ep0_trb = dma_alloc_coherent(dwc->dev, sizeof(*dwc->ep0_trb),
+			&dwc->ep0_trb_addr, GFP_KERNEL);
+	if (!dwc->ep0_trb) {
+		dev_err(dwc->dev, "failed to allocate ep0 trb\n");
+		ret = -ENOMEM;
+		goto err1;
+	}
+
+	dwc->setup_buf = dma_alloc_coherent(dwc->dev,
+			sizeof(*dwc->setup_buf) * 2,
+			&dwc->setup_buf_addr, GFP_KERNEL);
+	if (!dwc->setup_buf) {
+		dev_err(dwc->dev, "failed to allocate setup buffer\n");
+		ret = -ENOMEM;
+		goto err2;
+	}
+
 	dev_set_name(&dwc->gadget.dev, "gadget");
 
 	dwc->gadget.ops			= &dwc3_gadget_ops;
@@ -1652,10 +1669,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 
 	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)
-		goto err1;
-
-	/* begin to receive SETUP packets */
-	dwc3_ep0_out_start(dwc);
+		goto err3;
 
 	/* Start with SuperSpeed Default */
 	dwc3_gadget_ep0_desc.wMaxPacketSize = 512;
@@ -1664,14 +1678,14 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, false);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err2;
+		goto err4;
 	}
 
 	dep = dwc->eps[1];
 	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, false);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err3;
+		goto err5;
 	}
 
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
@@ -1681,7 +1695,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	if (ret) {
 		dev_err(dwc->dev, "failed to request irq #%d --> %d\n",
 				irq, ret);
-		goto err4;
+		goto err6;
 	}
 
 	/* Enable all but Start and End of Frame IRQs */
@@ -1698,20 +1712,35 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 
 	dwc3_gadget_run_stop(dwc, true);
 
+	/* begin to receive SETUP packets */
+	dwc->ep0state = EP0_IDLE;
+	dwc3_ep0_out_start(dwc);
+
 	return 0;
 
-err4:
+err6:
 	__dwc3_gadget_ep_disable(dwc->eps[1]);
 
-err3:
+err5:
 	__dwc3_gadget_ep_disable(dwc->eps[0]);
 
-err2:
+err4:
 	dwc3_gadget_free_endpoints(dwc);
 
-err1:
+err3:
 	the_dwc = NULL;
+	dma_free_coherent(dwc->dev, sizeof(*dwc->setup_buf) * 2,
+			dwc->setup_buf, dwc->setup_buf_addr);
 
+err2:
+	dma_free_coherent(dwc->dev, sizeof(*dwc->ep0_trb),
+			dwc->ep0_trb, dwc->ep0_trb_addr);
+
+err1:
+	dma_free_coherent(dwc->dev, sizeof(*dwc->ctrl_req),
+			dwc->ctrl_req, dwc->ctrl_req_addr);
+
+err0:
 	return ret;
 }
 
@@ -1728,6 +1757,15 @@ void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
 		__dwc3_gadget_ep_disable(dwc->eps[i]);
 
 	dwc3_gadget_free_endpoints(dwc);
+
+	dma_free_coherent(dwc->dev, sizeof(*dwc->setup_buf) * 2,
+			dwc->setup_buf, dwc->setup_buf_addr);
+
+	dma_free_coherent(dwc->dev, sizeof(*dwc->ep0_trb),
+			dwc->ep0_trb, dwc->ep0_trb_addr);
+
+	dma_free_coherent(dwc->dev, sizeof(*dwc->ctrl_req),
+			dwc->ctrl_req, dwc->ctrl_req_addr);
 
 	the_dwc = NULL;
 }
