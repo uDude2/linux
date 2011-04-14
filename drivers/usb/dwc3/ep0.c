@@ -54,6 +54,36 @@
 #include "gadget.h"
 #include "io.h"
 
+static const char *dwc3_ep0_state_string(enum dwc3_ep0_state state)
+{
+	switch (state) {
+	case EP0_UNCONNECTED:
+		return "Unconnected";
+	case EP0_IDLE:
+		return "Idle";
+	case EP0_IN_DATA_PHASE:
+		return "IN Data Phase";
+	case EP0_OUT_DATA_PHASE:
+		return "OUT Data Phase";
+	case EP0_IN_WAIT_GADGET:
+		return "IN Wait Gadget";
+	case EP0_OUT_WAIT_GADGET:
+		return "OUT Wait Gadget";
+	case EP0_IN_WAIT_NRDY:
+		return "IN Wait NRDY";
+	case EP0_OUT_WAIT_NRDY:
+		return "OUT Wait NRDY";
+	case EP0_IN_STATUS_PHASE:
+		return "IN Status Phase";
+	case EP0_OUT_STATUS_PHASE:
+		return "OUT Status Phase";
+	case EP0_STALL:
+		return "Stall";
+	default:
+		return "UNKNOWN";
+	}
+}
+
 static int dwc3_ep0_start_trans(struct dwc3 *dwc, u8 epnum, dma_addr_t buf_dma,
 		u32 len)
 {
@@ -87,20 +117,15 @@ static int dwc3_ep0_start_trans(struct dwc3 *dwc, u8 epnum, dma_addr_t buf_dma,
 			dwc->ep0state = EP0_IN_STATUS_PHASE;
 		else if (dwc->ep0state == EP0_OUT_WAIT_NRDY)
 			dwc->ep0state = EP0_OUT_STATUS_PHASE;
+		break;
 
 	case EP0_IN_WAIT_GADGET:
 		dwc->ep0state = EP0_IN_WAIT_NRDY;
-		/*
-		 * Not sure what this is about. The reference code does nothing
-		 * (except the sate change) and returns with 0
-		 */
-		WARN_ON(1);
 		return 0;
 		break;
 
 	case EP0_OUT_WAIT_GADGET:
 		dwc->ep0state = EP0_OUT_WAIT_NRDY;
-		WARN_ON(1);
 		return 0;
 
 		break;
@@ -153,12 +178,9 @@ static int __dwc3_gadget_ep0_queue(struct dwc3_ep *dep,
 	req->direction		= dep->direction;
 	req->epnum		= dep->number;
 
-	if (!(dep->number & 1)) {
+	if (!(dep->number & 1))
 		/* IS OUT */
 		u32 len = req->request.length;
-
-		WARN_ON(len % dep->endpoint.maxpacket);
-	}
 
 	dwc3_gadget_add_request(dep, req);
 	dwc3_map_buffer_to_dma(req);
@@ -243,17 +265,57 @@ static void dwc3_ep0_do_setup_status(struct dwc3 *dwc,
 	 * HW reacts strange on a NULL pointer
 	 */
 	ret = dwc3_ep0_start_trans(dwc, epnum, dwc->ctrl_req_addr, 0);
-	if (ret)
+	if (ret) {
+		dev_dbg(dwc->dev, "failed to start transfer, stalling\n");
 		dwc3_ep0_stall_and_restart(dwc);
+	}
+}
+
+static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
+		struct dwc3_event_depevt *event)
+{
+	struct usb_ctrlrequest *ctrl = dwc->ctrl_req;
+	int ret;
+	u32 len;
+
+	if (!dwc->gadget_driver)
+		goto err;
+
+	len = le16_to_cpu(ctrl->wLength);
+	if (!len) {
+		dwc->ep0state = EP0_IN_WAIT_GADGET;
+		dwc->three_stage_setup = 0;
+	} else {
+		dwc->three_stage_setup = 1;
+		if (ctrl->bRequestType & USB_DIR_IN)
+			dwc->ep0state = EP0_IN_DATA_PHASE;
+		else
+			dwc->ep0state = EP0_OUT_DATA_PHASE;
+	}
+
+	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD)
+		ret = dwc3_ep0_std_request(dwc, ctrl);
+	else
+		ret = dwc3_ep0_delegate_req(dwc, ctrl);
+
+	if (ret >= 0)
+		return;
+
+err:
+	dwc3_ep0_stall_and_restart(dwc);
 }
 
 static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 		struct dwc3_event_depevt *event)
 {
+	dev_vdbg(dwc->dev, "Xfer Not Ready while on state '%s'\n",
+			dwc3_ep0_state_string(dwc->ep0state));
+
 	switch (dwc->ep0state) {
 	case EP0_UNCONNECTED:
 		break;
 	case EP0_IDLE:
+		dwc3_ep0_inspect_setup(dwc, event);
 		break;
 	case EP0_IN_DATA_PHASE:
 		break;
@@ -525,60 +587,32 @@ static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 
 	switch (ctrl->bRequest) {
 	case USB_REQ_GET_STATUS:
+		dev_vdbg(dwc->dev, "USB_REQ_GET_STATUS\n");
 		ret = dwc3_ep0_handle_status(dwc, ctrl);
 		break;
 	case USB_REQ_CLEAR_FEATURE:
+		dev_vdbg(dwc->dev, "USB_REQ_CLEAR_FEATURE\n");
 		ret = dwc3_ep0_handle_feature(dwc, ctrl, 0);
 		break;
 	case USB_REQ_SET_FEATURE:
+		dev_vdbg(dwc->dev, "USB_REQ_SET_FEATURE\n");
 		ret = dwc3_ep0_handle_feature(dwc, ctrl, 1);
 		break;
 	case USB_REQ_SET_ADDRESS:
+		dev_vdbg(dwc->dev, "USB_REQ_SET_ADDRESS\n");
 		ret = dwc3_ep0_set_address(dwc, ctrl);
 		break;
 	case USB_REQ_SET_CONFIGURATION:
+		dev_vdbg(dwc->dev, "USB_REQ_SET_CONFIGURATION\n");
 		ret = dwc3_ep0_set_config(dwc, ctrl);
 		break;
 	default:
+		dev_vdbg(dwc->dev, "Forwarding to gadget driver\n");
 		ret = dwc3_ep0_delegate_req(dwc, ctrl);
 		break;
 	};
 
 	return ret;
-}
-
-static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
-{
-	struct usb_ctrlrequest *ctrl = dwc->ctrl_req;
-	int ret;
-	u32 len;
-
-	if (!dwc->gadget_driver)
-		goto err;
-
-	len = le16_to_cpu(ctrl->wLength);
-	if (!len) {
-		dwc->ep0state = EP0_IN_WAIT_GADGET;
-		dwc->three_stage_setup = 0;
-	} else {
-		dwc->three_stage_setup = 1;
-		if (ctrl->bRequestType & USB_DIR_IN)
-			dwc->ep0state = EP0_IN_DATA_PHASE;
-		else
-			dwc->ep0state = EP0_OUT_DATA_PHASE;
-	}
-
-	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD)
-		ret = dwc3_ep0_std_request(dwc, ctrl);
-	else
-		ret = dwc3_ep0_delegate_req(dwc, ctrl);
-
-	if (ret >= 0)
-		return;
-
-err:
-	dwc3_ep0_stall_and_restart(dwc);
 }
 
 static void dwc3_ep0_complete_data(struct dwc3 *dwc,
@@ -634,15 +668,18 @@ static void dwc3_ep0_complete_req(struct dwc3 *dwc,
 
 	epnum = event->endpoint_number;
 	dep = dwc->eps[epnum];
-	r = list_first_entry(&dep->request_list, struct dwc3_request, list);
 
-	list_del(&r->list);
-	r->request.status = 0;
-	/*
-	 * not dropping locks because an enqueue in this callback would
-	 * confuse the state engine
-	 */
-	r->request.complete(&dep->endpoint, &r->request);
+	if (!list_empty(&dep->request_list)) {
+		r = list_first_entry(&dep->request_list, struct dwc3_request, list);
+
+		list_del(&r->list);
+		r->request.status = 0;
+		/*
+		 * not dropping locks because an enqueue in this callback would
+		 * confuse the state engine
+		 */
+		r->request.complete(&dep->endpoint, &r->request);
+	}
 
 	dwc->ep0state = EP0_IDLE;
 	dwc3_ep0_out_start(dwc);
