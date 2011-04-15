@@ -183,7 +183,8 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	} while (1);
 }
 
-static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
+static int dwc3_alloc_trb_pool(struct dwc3_ep *dep,
+		const struct usb_endpoint_descriptor *desc)
 {
 	struct dwc3_trb_hw	*trb_st_hw;
 	struct dwc3_trb_hw	*trb_link_hw;
@@ -203,7 +204,7 @@ static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
 		return -ENOMEM;
 	}
 
-	if (!usb_endpoint_xfer_isoc(dep->desc))
+	if (!usb_endpoint_xfer_isoc(desc))
 		return 0;
 
 	memset(&trb_link, 0, sizeof(trb_link));
@@ -267,23 +268,32 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
 
 	params.param1.depcfg.xfer_complete_enable = true;
-	params.param1.depcfg.xfer_in_progress_enable = true;
 	params.param1.depcfg.xfer_not_ready_enable = true;
-	params.param1.depcfg.ep_number = dep->number;
+	params.param1.depcfg.ep_direction = dep->number & 1;
 
-	/*
-	 * REVISIT for some reason, databook says in case we're
-	 * working in FullSpeed binterval_m1 field from DEPCFG
-	 * parameter 1, _MUST_ be set to zero. Gadget drivers use
-	 * those at least on interrupt endpoints both on high and
-	 * full speed.
-	 *
-	 * Maybe we just don't need to let the hardware know about
-	 * it. Anyway, if we're not working on FULLSPEED we have
-	 * to set binterval_m1 field to desc->bInterval - 1
-	 */
-	if (dwc->speed != DWC3_DSTS_FULLSPEED2 &&
-			dwc->speed != DWC3_DSTS_FULLSPEED1) {
+	if (usb_endpoint_xfer_isoc(desc))
+		params.param1.depcfg.xfer_in_progress_enable = true;
+
+	if (dep->number == 0 || dep->number == 1) {
+		/*
+		 * Physical Endpoints 0 and 1 *MUST* be mapped
+		 * to Logical Endpoint 0. Do not change this or
+		 * the driver has no way to work.
+		 */
+		params.param1.depcfg.ep_number = 0;
+	} else {
+		/*
+		 * We are doing 1:1 mapping for other endpoints, meaning
+		 * Physical Endpoints 2 maps to Logical Endpoint 2 and
+		 * so on.
+		 *
+		 * We did this on purpose so that don't need to have trickery
+		 * mapping logical endpoints to physical endpoints and so on.
+		 */
+		params.param1.depcfg.ep_number = dep->number;
+	}
+
+	if (dwc->speed == USB_SPEED_SUPER) {
 		if (desc->bInterval) {
 			params.param1.depcfg.binterval_m1 = desc->bInterval - 1;
 			dep->interval = 1 << (desc->bInterval - 1);
@@ -433,11 +443,13 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 		return 0;
 	}
 
-	ret = dwc3_alloc_trb_pool(dep);
+	ret = dwc3_alloc_trb_pool(dep, desc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to allocate TRB pool\n");
 		return ret;
 	}
+
+	dev_vdbg(dwc->dev, "Enabling %s\n", dep->name);
 
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep_enable(dep, desc, true);
@@ -696,6 +708,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 		return 0;
 
 	dwc3_prepare_trbs(dep, false);
+
 	return 0;
 }
 
@@ -716,7 +729,8 @@ static int dwc3_gadget_ep_queue(struct usb_ep *ep, struct usb_request *request,
 		return -ESHUTDOWN;
 	}
 
-	dev_vdbg(dwc->dev, "queing request %p to %s\n", request, ep->name);
+	dev_vdbg(dwc->dev, "queing request %p to %s length %d\n",
+			request, ep->name, request->length);
 
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep_queue(dep, req);
@@ -1424,13 +1438,19 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	switch (speed) {
 	case DWC3_DCFG_SUPERSPEED:
 		dwc3_gadget_ep0_desc.wMaxPacketSize = 512;
+		dwc->gadget.speed = USB_SPEED_SUPER;
 		break;
 	case DWC3_DCFG_HIGHSPEED:
+		dwc3_gadget_ep0_desc.wMaxPacketSize = 64;
+		dwc->gadget.speed = USB_SPEED_HIGH;
+		break;
 	case DWC3_DCFG_FULLSPEED2:
 	case DWC3_DCFG_FULLSPEED1:
 		dwc3_gadget_ep0_desc.wMaxPacketSize = 64;
+		dwc->gadget.speed = USB_SPEED_FULL;
 	case DWC3_DCFG_LOWSPEED:
 		dwc3_gadget_ep0_desc.wMaxPacketSize = 8;
+		dwc->gadget.speed = USB_SPEED_LOW;
 		break;
 	}
 

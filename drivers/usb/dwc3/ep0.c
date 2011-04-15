@@ -229,7 +229,8 @@ int dwc3_gadget_ep0_queue(struct usb_ep *ep, struct usb_request *request,
 		return -ESHUTDOWN;
 	}
 
-	dev_vdbg(dwc->dev, "queing request %p to %s\n", request, ep->name);
+	dev_vdbg(dwc->dev, "queueing request %p to %s length %d\n",
+			request, ep->name, request->length);
 
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep0_queue(dep, req);
@@ -646,7 +647,7 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 	dep = dwc->eps[epnum];
 
 	if (!dwc->ep0_status_pending) {
-		r = list_first_entry(&dep->request_list, struct dwc3_request, list);
+		r = next_request(&dep->request_list);
 		ur = &r->request;
 	} else {
 		ur = &dwc->ep0_usb_req;
@@ -705,6 +706,9 @@ static void dwc3_ep0_complete_req(struct dwc3 *dwc,
 static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 			struct dwc3_event_depevt *event)
 {
+	dev_vdbg(dwc->dev, "Xfer Complete while on state '%s'\n",
+			dwc3_ep0_state_string(dwc->ep0state));
+
 	switch (dwc->ep0state) {
 	case EP0_UNCONNECTED:
 		break;
@@ -723,8 +727,8 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 		break;
 
 	case EP0_IN_WAIT_NRDY:
-		break;
 	case EP0_OUT_WAIT_NRDY:
+		dwc3_ep0_do_setup_status(dwc, event);
 		break;
 
 	case EP0_IN_STATUS_PHASE:
@@ -743,7 +747,8 @@ void dwc3_ep0_interrupt(struct dwc3 *dwc,
 
 	switch (event->endpoint_event) {
 	case DWC3_DEPEVT_XFERCOMPLETE:
-		dev_vdbg(dwc->dev, "ep%din Transfer Complete\n", epnum);
+		dev_vdbg(dwc->dev, "ep%d%s Transfer Complete\n", epnum,
+				epnum & 1 ? "in" : "out");
 		dwc3_ep0_xfer_complete(dwc, event);
 		break;
 
