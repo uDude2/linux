@@ -479,6 +479,9 @@ static int dwc3_gadget_ep_disable(struct usb_ep *ep)
 		return 0;
 	}
 
+	snprintf(dep->name, sizeof(dep->name), "ep%d%s", dep->number,
+				(dep->number & 1) ? "in" : "out");
+
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep_disable(dep);
 	spin_unlock_irqrestore(&dwc->lock, flags);
@@ -605,6 +608,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		} else {
 			trb.lst = last_one;
 			trb.ioc = last_one;
+			trb.isp_imi = true;
 		}
 
 		switch (usb_endpoint_type(dep->desc)) {
@@ -1350,6 +1354,7 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	reg &= ~DWC3_DCTL_INITU2ENA;
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 #endif
+
 	dwc3_disconnect_gadget(dwc);
 	dwc3_stop_active_transfers(dwc);
 }
@@ -1360,7 +1365,9 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 
 	dev_vdbg(dwc->dev, "%s\n", __func__);
 
-	dwc3_disconnect_gadget(dwc);
+	if (dwc->gadget.speed != USB_SPEED_UNKNOWN)
+		dwc3_disconnect_gadget(dwc);
+
 	dwc3_stop_active_transfers(dwc);
 	dwc3_clear_stall_all_ep(dwc);
 
