@@ -229,6 +229,12 @@ int dwc3_gadget_ep0_queue(struct usb_ep *ep, struct usb_request *request,
 		return -ESHUTDOWN;
 	}
 
+	/* we share one TRB for ep0/1 */
+	if (!list_empty(&dwc->eps[0]->request_list) ||
+			!list_empty(&dwc->eps[1]->request_list) ||
+			dwc->ep0_status_pending)
+		return -EBUSY;
+
 	dev_vdbg(dwc->dev, "queueing request %p to %s length %d, state '%s'\n",
 			request, dep->name, request->length,
 			dwc3_ep0_state_string(dwc->ep0state));
@@ -603,7 +609,7 @@ err:
 static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 		struct dwc3_event_depevt *event)
 {
-	struct dwc3_request	*r;
+	struct dwc3_request	*r = NULL;
 	struct usb_request	*ur;
 	struct dwc3_trb		trb;
 	struct dwc3_ep		*dep;
@@ -641,6 +647,9 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 			dwc->ep0state = EP0_IN_WAIT_NRDY;
 		else
 			dwc->ep0state = EP0_OUT_WAIT_NRDY;
+
+		if (r)
+			dwc3_gadget_giveback(dep, r, 0);
 	}
 }
 
@@ -655,15 +664,9 @@ static void dwc3_ep0_complete_req(struct dwc3 *dwc,
 	dep = dwc->eps[epnum];
 
 	if (!list_empty(&dep->request_list)) {
-		r = list_first_entry(&dep->request_list, struct dwc3_request, list);
+		r = next_request(&dep->request_list);
 
-		list_del(&r->list);
-		r->request.status = 0;
-		/*
-		 * not dropping locks because an enqueue in this callback would
-		 * confuse the state engine
-		 */
-		r->request.complete(&dep->endpoint, &r->request);
+		dwc3_gadget_giveback(dep, r, 0);
 	}
 
 	dwc->ep0state = EP0_IDLE;
@@ -674,8 +677,6 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 			struct dwc3_event_depevt *event)
 {
 	switch (dwc->ep0state) {
-	case EP0_UNCONNECTED:
-		break;
 	case EP0_IDLE:
 		dwc3_ep0_inspect_setup(dwc, event);
 		break;
@@ -683,11 +684,6 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 	case EP0_IN_DATA_PHASE:
 	case EP0_OUT_DATA_PHASE:
 		dwc3_ep0_complete_data(dwc, event);
-		break;
-
-	case EP0_IN_WAIT_GADGET:
-		break;
-	case EP0_OUT_WAIT_GADGET:
 		break;
 
 	case EP0_IN_WAIT_NRDY:
@@ -699,6 +695,10 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 	case EP0_OUT_STATUS_PHASE:
 		dwc3_ep0_complete_req(dwc, event);
 		break;
+
+	case EP0_IN_WAIT_GADGET:
+	case EP0_OUT_WAIT_GADGET:
+	case EP0_UNCONNECTED:
 	case EP0_STALL:
 		break;
 	}
@@ -708,28 +708,24 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 		struct dwc3_event_depevt *event)
 {
 	switch (dwc->ep0state) {
-	case EP0_UNCONNECTED:
-		break;
-	case EP0_IDLE:
-		dwc3_ep0_inspect_setup(dwc, event);
-		break;
-	case EP0_IN_DATA_PHASE:
-		break;
-	case EP0_OUT_DATA_PHASE:
-		break;
 	case EP0_IN_WAIT_GADGET:
 		dwc->ep0state = EP0_IN_WAIT_NRDY;
 		break;
 	case EP0_OUT_WAIT_GADGET:
 		dwc->ep0state = EP0_OUT_WAIT_NRDY;
 		break;
+
 	case EP0_IN_WAIT_NRDY:
 	case EP0_OUT_WAIT_NRDY:
 		dwc3_ep0_do_setup_status(dwc, event);
 		break;
+
+	case EP0_IDLE:
 	case EP0_IN_STATUS_PHASE:
 	case EP0_OUT_STATUS_PHASE:
-		break;
+	case EP0_IN_DATA_PHASE:
+	case EP0_OUT_DATA_PHASE:
+	case EP0_UNCONNECTED:
 	case EP0_STALL:
 		break;
 	}

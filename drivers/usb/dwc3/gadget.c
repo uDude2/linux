@@ -90,7 +90,7 @@ void dwc3_unmap_buffer_from_dma(struct dwc3_request *req)
 	}
 }
 
-static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
+void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 		int status)
 {
 	struct dwc3			*dwc = dep->dwc;
@@ -107,7 +107,7 @@ static void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 			dep->busy_slot++;
 		list_del(&req->list);
 	} else {
-		 dwc3_gadget_del_request(req);
+		dwc3_gadget_del_request(req);
 	}
 
 	if (req->request.status == -EINPROGRESS)
@@ -598,7 +598,6 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 			last_one = 1;
 
 		req->trb = trb_hw;
-		req->queued = 1;
 
 		trb.bplh = req->request.dma;
 
@@ -1231,7 +1230,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 	switch (event->endpoint_event) {
 	case DWC3_DEPEVT_XFERCOMPLETE:
 		if (usb_endpoint_xfer_isoc(dep->desc)) {
-			dev_err(dwc->dev, "%s is an Isochronous endpoint\n",
+			dev_dbg(dwc->dev, "%s is an Isochronous endpoint\n",
 					dep->name);
 			return;
 		}
@@ -1240,7 +1239,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		break;
 	case DWC3_DEPEVT_XFERINPROGRESS:
 		if (!usb_endpoint_xfer_isoc(dep->desc)) {
-			dev_err(dwc->dev, "%s is not an Isochronous endpoint\n",
+			dev_dbg(dwc->dev, "%s is not an Isochronous endpoint\n",
 					dep->name);
 			return;
 		}
@@ -1249,7 +1248,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		break;
 	case DWC3_DEPEVT_XFERNOTREADY:
 		if (!usb_endpoint_xfer_isoc(dep->desc)) {
-			dev_err(dwc->dev, "%s is not an Isochronous endpoint\n",
+			dev_dbg(dwc->dev, "%s is not an Isochronous endpoint\n",
 					dep->name);
 			return;
 		}
@@ -1278,6 +1277,23 @@ static void dwc3_disconnect_gadget(struct dwc3 *dwc)
 	}
 }
 
+static void dwc3_gadget_nuke(struct dwc3_ep *dep, const int status)
+{
+	struct dwc3_request		*req;
+
+	while (!list_empty(&dep->request_list)) {
+		req = next_request(&dep->request_list);
+
+		dwc3_gadget_giveback(dep, req, status);
+	}
+
+	while (!list_empty(&dep->req_queued)) {
+		req = next_request(&dep->req_queued);
+
+		dwc3_gadget_giveback(dep, req, status);
+	}
+}
+
 static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 {
 	u32 epnum;
@@ -1288,31 +1304,25 @@ static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 		u32 cmd;
 		int ret;
 
-		if (epnum == 0) {
-			/*
-			 * XXX
-			 * get the core into the "Setup a Control-Setup TRB /
-			 * Start Transfer" state in case it is busy here.
-			 */
-			continue;
-		}
 		dep = dwc->eps[epnum];
 
 		if (!(dep->flags & DWC3_EP_ENABLED))
 			continue;
 
-		cmd = DWC3_DEPCMD_ENDTRANSFER;
+		dwc3_gadget_nuke(dep, -ESHUTDOWN);
 
-		/*
-		 * This one issues an interrupt. I wonder if we have to wait
-		 * for it or can simply ignore/remove the inrerupt
-		 */
-		cmd |= DWC3_DEPCMD_CMDIOC;
+		cmd = DWC3_DEPCMD_ENDTRANSFER;
 		cmd |= DWC3_DEPCMD_HIPRI_FORCERM;
 		cmd |= DWC3_DEPCMD_PARAM(dep->res_trans_idx);
 		memset(&params, 0, sizeof(params));
 		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
 		WARN_ON_ONCE(ret);
+
+		if (epnum == 0) {
+			/* begin to receive SETUP packets */
+			dwc->ep0state = EP0_IDLE;
+			dwc3_ep0_out_start(dwc);
+		}
 	}
 }
 
@@ -1355,8 +1365,10 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 #endif
 
-	dwc3_disconnect_gadget(dwc);
 	dwc3_stop_active_transfers(dwc);
+	dwc3_disconnect_gadget(dwc);
+
+	dwc->gadget.speed = USB_SPEED_UNKNOWN;
 }
 
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
@@ -1794,6 +1806,8 @@ void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
 	dma_free_coherent(dwc->dev, sizeof(*dwc->ctrl_req),
 			dwc->ctrl_req, dwc->ctrl_req_addr);
 
+	device_unregister(&dwc->gadget.dev);
+
 	the_dwc = NULL;
 }
 
@@ -1877,6 +1891,7 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 	if (dwc->gadget_driver != driver)
 		return -EINVAL;
 
+	driver->disconnect(&dwc->gadget);
 	driver->unbind(&dwc->gadget);
 
 	spin_lock_irqsave(&dwc->lock, flags);
