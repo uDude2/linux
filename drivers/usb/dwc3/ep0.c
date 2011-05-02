@@ -55,7 +55,7 @@
 #include "io.h"
 
 static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event);
+		const struct dwc3_event_depevt *event);
 
 static const char *dwc3_ep0_state_string(enum dwc3_ep0_state state)
 {
@@ -223,24 +223,29 @@ int dwc3_gadget_ep0_queue(struct usb_ep *ep, struct usb_request *request,
 		return -EINVAL;
 	}
 
+	spin_lock_irqsave(&dwc->lock, flags);
 	if (!dep->desc) {
 		dev_dbg(dwc->dev, "trying to queue request %p to disabled %s\n",
 				request, dep->name);
-		return -ESHUTDOWN;
+		ret = -ESHUTDOWN;
+		goto out;
 	}
 
 	/* we share one TRB for ep0/1 */
 	if (!list_empty(&dwc->eps[0]->request_list) ||
 			!list_empty(&dwc->eps[1]->request_list) ||
-			dwc->ep0_status_pending)
-		return -EBUSY;
+			dwc->ep0_status_pending) {
+		ret = -EBUSY;
+		goto out;
+	}
 
 	dev_vdbg(dwc->dev, "queueing request %p to %s length %d, state '%s'\n",
 			request, dep->name, request->length,
 			dwc3_ep0_state_string(dwc->ep0state));
 
-	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep0_queue(dep, req);
+
+out:
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return ret;
@@ -271,7 +276,7 @@ void dwc3_ep0_out_start(struct dwc3 *dwc)
  * Send a zero length packet for the status phase of the control transfer
  */
 static void dwc3_ep0_do_setup_status(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
+		const struct dwc3_event_depevt *event)
 {
 	struct dwc3_ep			*dep;
 	int				ret;
@@ -573,7 +578,7 @@ static int dwc3_ep0_std_request(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 }
 
 static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
+		const struct dwc3_event_depevt *event)
 {
 	struct usb_ctrlrequest *ctrl = dwc->ctrl_req;
 	int ret;
@@ -607,7 +612,7 @@ err:
 }
 
 static void dwc3_ep0_complete_data(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
+		const struct dwc3_event_depevt *event)
 {
 	struct dwc3_request	*r = NULL;
 	struct usb_request	*ur;
@@ -654,7 +659,7 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 }
 
 static void dwc3_ep0_complete_req(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
+		const struct dwc3_event_depevt *event)
 {
 	struct dwc3_request	*r;
 	struct dwc3_ep		*dep;
@@ -674,7 +679,7 @@ static void dwc3_ep0_complete_req(struct dwc3 *dwc,
 }
 
 static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
-			struct dwc3_event_depevt *event)
+			const struct dwc3_event_depevt *event)
 {
 	switch (dwc->ep0state) {
 	case EP0_IDLE:
@@ -686,16 +691,13 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 		dwc3_ep0_complete_data(dwc, event);
 		break;
 
-	case EP0_IN_WAIT_NRDY:
-	case EP0_OUT_WAIT_NRDY:
-		dwc3_ep0_do_setup_status(dwc, event);
-		break;
-
 	case EP0_IN_STATUS_PHASE:
 	case EP0_OUT_STATUS_PHASE:
 		dwc3_ep0_complete_req(dwc, event);
 		break;
 
+	case EP0_IN_WAIT_NRDY:
+	case EP0_OUT_WAIT_NRDY:
 	case EP0_IN_WAIT_GADGET:
 	case EP0_OUT_WAIT_GADGET:
 	case EP0_UNCONNECTED:
@@ -705,7 +707,7 @@ static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 }
 
 static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
+		const struct dwc3_event_depevt *event)
 {
 	switch (dwc->ep0state) {
 	case EP0_IN_WAIT_GADGET:
@@ -732,7 +734,7 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 }
 
 void dwc3_ep0_interrupt(struct dwc3 *dwc,
-		struct dwc3_event_depevt *event)
+		const const struct dwc3_event_depevt *event)
 {
 	u8			epnum = event->endpoint_number;
 
