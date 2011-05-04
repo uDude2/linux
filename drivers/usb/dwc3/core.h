@@ -297,7 +297,6 @@ struct dwc3_event_buffer {
  * struct dwc3_ep - device side endpoint representation
  * @endpoint: usb endpoint
  * @request_list: list of requests for this endpoint
- * @request_count: number of requests in our list
  * @req_queued: list of requests on this ep which have TRBs setup
  * @trb_pool: array of transaction buffers
  * @free_slot: next slot which is going to be used
@@ -316,7 +315,6 @@ struct dwc3_event_buffer {
 struct dwc3_ep {
 	struct usb_ep		endpoint;
 	struct list_head	request_list;
-	unsigned		request_count;
 	struct list_head	req_queued;
 
 	struct dwc3_trb_hw		*trb_pool;

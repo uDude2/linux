@@ -105,10 +105,8 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 		if (((dep->busy_slot & DWC3_TRB_MASK) == DWC3_TRB_NUM - 1) &&
 				usb_endpoint_xfer_isoc(dep->desc))
 			dep->busy_slot++;
-		list_del(&req->list);
-	} else {
-		dwc3_gadget_del_request(req);
 	}
+	list_del(&req->list);
 
 	if (req->request.status == -EINPROGRESS)
 		req->request.status = status;
@@ -693,7 +691,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	req->epnum		= dep->number;
 
 	dwc3_map_buffer_to_dma(req);
-	dwc3_gadget_add_request(dep, req);
+	list_add_tail(&req->list, &dep->request_list);
 
 	if (!usb_endpoint_xfer_isoc(dep->desc) &&
 			!list_empty(&dep->req_queued)) {
@@ -1192,7 +1190,7 @@ static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 {
 	u32 uf;
 
-	if (!dep->request_count) {
+	if (list_empty(&dep->request_list)) {
 		dev_vdbg(dwc->dev, "ISOC ep %s run out for requests.\n",
 			dep->name);
 		return;
