@@ -267,8 +267,7 @@ void dwc3_ep0_out_start(struct dwc3 *dwc)
 
 	dep = dwc->eps[0];
 
-	ret = dwc3_ep0_start_trans(dwc, 0, dwc->ctrl_req_addr,
-			dep->endpoint.maxpacket);
+	ret = dwc3_ep0_start_trans(dwc, 0, dwc->ctrl_req_addr, 8);
 	WARN_ON(ret < 0);
 }
 
