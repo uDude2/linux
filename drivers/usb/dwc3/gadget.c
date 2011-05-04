@@ -1381,7 +1381,7 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 
 	/* Reset device address to zero */
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-	reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DAVADDR_MASK));
+	reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DEVADDR_MASK));
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 
 	/*
