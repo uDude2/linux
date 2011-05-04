@@ -1073,7 +1073,7 @@ static int __init dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 			if (!epnum)
 				dwc->gadget.ep0 = &dep->endpoint;
 		} else {
-			dep->endpoint.maxpacket = 512;
+			dep->endpoint.maxpacket = 1024;
 			dep->endpoint.ops = &dwc3_gadget_ep_ops;
 			dep->direction = (epnum & 1) ? true : false;
 			list_add_tail(&dep->endpoint.ep_list,
