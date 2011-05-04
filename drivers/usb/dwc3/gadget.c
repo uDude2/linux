@@ -534,12 +534,10 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 	struct dwc3_trb		trb;
 	struct dwc3		*dwc	= dep->dwc;
 	u32			trbs_left;
-	u32			req_left;
 
 	BUILD_BUG_ON_NOT_POWER_OF_2(DWC3_TRB_NUM);
 
 	/* the first request must not be queued */
-	req_left = dep->request_count;
 	trbs_left = (dep->busy_slot - dep->free_slot) & DWC3_TRB_MASK;
 	/*
 	 * if busy & slot are equal than it is either full or empty. If we are
@@ -587,15 +585,15 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 				usb_endpoint_xfer_isoc(dep->desc))
 			continue;
 
+		dwc3_gadget_move_request_queued(req);
 		memset(&trb, 0, sizeof(trb));
 		trbs_left--;
-		req_left--;
 
 		/* Is our TRB pool empty? */
 		if (!trbs_left)
 			last_one = 1;
 		/* Is this the last request? */
-		if (!req_left)
+		if (list_empty(&req->list))
 			last_one = 1;
 
 		req->trb = trb_hw;
@@ -642,7 +640,6 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		dwc3_trb_to_hw(&trb, trb_hw);
 		req->trb_dma = dma_map_single(dwc->dev, trb_hw, sizeof(*trb_hw),
 				DMA_BIDIRECTIONAL);
-		dwc3_gadget_move_request_queued(req);
 
 		if (last_one)
 			break;
