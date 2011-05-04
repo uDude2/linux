@@ -1068,7 +1068,7 @@ static int __init dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 		dep->endpoint.name = dep->name;
 
 		if (epnum == 0 || epnum == 1) {
-			dep->endpoint.maxpacket = 64;
+			dep->endpoint.maxpacket = 512;
 			dep->endpoint.ops = &dwc3_gadget_ep0_ops;
 			if (!epnum)
 				dwc->gadget.ep0 = &dep->endpoint;
