@@ -1463,6 +1463,7 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	case DWC3_DCFG_FULLSPEED1:
 		dwc3_gadget_ep0_desc.wMaxPacketSize = 64;
 		dwc->gadget.speed = USB_SPEED_FULL;
+		break;
 	case DWC3_DCFG_LOWSPEED:
 		dwc3_gadget_ep0_desc.wMaxPacketSize = 8;
 		dwc->gadget.speed = USB_SPEED_LOW;
