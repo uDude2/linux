@@ -292,6 +292,13 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		params.param1.depcfg.ep_number = dep->number;
 	}
 
+	/*
+	 * We must use the lower 16 TX FIFOs even though
+	 * HW might have more
+	 */
+	if (dep->number & 1)
+		params.param0.depcfg.fifo_number = dep->number >> 1;
+
 	if (dwc->speed == USB_SPEED_SUPER) {
 		if (desc->bInterval) {
 			params.param1.depcfg.binterval_m1 = desc->bInterval - 1;
