@@ -269,7 +269,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	params.param1.depcfg.ep_direction = dep->direction;
 	params.param1.depcfg.xfer_not_ready_enable = true;
 
-	if (usb_endpoint_xfer_isoc(desc) || usb_endpoint_xfer_control(desc))
+	if (usb_endpoint_xfer_isoc(desc))
 		params.param1.depcfg.xfer_in_progress_enable = true;
 
 	if (dep->number == 0 || dep->number == 1) {
