@@ -1192,6 +1192,9 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 
 	dep = dwc->eps[epnum];
 
+	dev_vdbg(dwc->dev, "%s: %s\n", dep->name,
+			dwc3_ep_event_string(event->endpoint_event));
+
 	if (epnum == 0 || epnum == 1) {
 		dwc3_ep0_interrupt(dwc, event);
 		return;
