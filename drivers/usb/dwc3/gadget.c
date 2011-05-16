@@ -151,10 +151,12 @@ static const char *dwc3_gadget_ep_cmd_string(u8 cmd)
 int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 		unsigned cmd, struct dwc3_gadget_ep_cmd_params *params)
 {
+	struct dwc3_ep		*dep = dwc->eps[ep];
 	unsigned long		timeout = 500;
 	u32			reg;
 
-	dev_vdbg(dwc->dev, "Sending '%s' with parameters %08x %08x %08x\n",
+	dev_vdbg(dwc->dev, "%s: cmd '%s' params %08x %08x %08x\n",
+			dep->name,
 			dwc3_gadget_ep_cmd_string(cmd), params->param0.raw,
 			params->param1.raw, params->param2.raw);
 
