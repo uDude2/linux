@@ -595,7 +595,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		if (!trbs_left)
 			last_one = 1;
 		/* Is this the last request? */
-		if (list_empty(&req->list))
+		if (list_empty(&dep->request_list))
 			last_one = 1;
 
 		req->trb = trb_hw;
