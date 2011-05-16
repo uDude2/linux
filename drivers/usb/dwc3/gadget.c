@@ -658,6 +658,8 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 
 	dwc3_prepare_trbs(dep, true);
 	req = next_request(&dep->req_queued);
+	if (!req)
+		return 0;
 
 	memset(&params, 0, sizeof(params));
 	params.param0.depstrtxfer.transfer_desc_addr_high =
