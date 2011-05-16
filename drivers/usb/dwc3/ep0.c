@@ -267,8 +267,7 @@ void dwc3_ep0_out_start(struct dwc3 *dwc)
 
 	dep = dwc->eps[0];
 
-	ret = dwc3_ep0_start_trans(dwc, 0, dwc->ctrl_req_addr,
-			dep->endpoint.maxpacket);
+	ret = dwc3_ep0_start_trans(dwc, 0, dwc->ctrl_req_addr, 8);
 	WARN_ON(ret < 0);
 }
 
@@ -479,7 +478,7 @@ static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 		 * Not sure if we should program DevAddr now or later
 		 */
 		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-		reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DAVADDR_MASK));
+		reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DEVADDR_MASK));
 		reg |= addr;
 		dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 		if (addr)
@@ -491,7 +490,7 @@ static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 			dwc->dev_state = DWC3_DEFAULT_STATE;
 		} else {
 			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-			reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DAVADDR_MASK));
+			reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DEVADDR_MASK));
 			reg |= addr;
 			dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 		}

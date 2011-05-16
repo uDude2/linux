@@ -155,9 +155,17 @@
 
 #define DWC3_GCTL_DISSCRAMBLE	(1 << 3)
 
+/* Global USB2 PHY Configuration Register */
+#define DWC3_GUSB2PHYCFG_PHYSOFTRST (1 << 31)
+#define DWC3_GUSB2PHYCFG_SUSPHY	(1 << 6)
+
+/* Global USB3 PIPE Control Register */
+#define DWC3_GUSB3PIPECTL_PHYSOFTRST (1 << 31)
+#define DWC3_GUSB3PIPECTL_SUSPHY (1 << 17)
+
 /* Device Configuration Register */
 #define DWC3_DCFG_DEVADDR(addr)	((addr) << 3)
-#define DWC3_DCFG_DAVADDR_MASK	DWC3_DCFG_DEVADDR(((1 << 7) - 1))
+#define DWC3_DCFG_DEVADDR_MASK	DWC3_DCFG_DEVADDR(((1 << 7) - 1))
 
 #define DWC3_DCFG_SUPERSPEED	(4 << 0)
 #define DWC3_DCFG_HIGHSPEED	(0 << 0)
@@ -328,6 +336,7 @@ struct dwc3_ep {
 #define DWC3_EP_STALL		(1 << 1)
 #define DWC3_EP_WEDGE		(1 << 2)
 #define DWC3_EP_ISOC_RUNNING	(1 << 3)
+#define DWC3_EP_BUSY		(1 << 4)
 
 	unsigned		current_trb;
 
