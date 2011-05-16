@@ -266,12 +266,11 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
 
 	params.param1.depcfg.xfer_complete_enable = true;
-	params.param1.depcfg.ep_direction = dep->number & 1;
+	params.param1.depcfg.ep_direction = dep->direction;
+	params.param1.depcfg.xfer_not_ready_enable = true;
 
-	if (usb_endpoint_xfer_isoc(desc) || usb_endpoint_xfer_control(desc)) {
+	if (usb_endpoint_xfer_isoc(desc) || usb_endpoint_xfer_control(desc))
 		params.param1.depcfg.xfer_in_progress_enable = true;
-		params.param1.depcfg.xfer_not_ready_enable = true;
-	}
 
 	if (dep->number == 0 || dep->number == 1) {
 		/*
@@ -296,7 +295,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	 * We must use the lower 16 TX FIFOs even though
 	 * HW might have more
 	 */
-	if (dep->number & 1)
+	if (dep->direction)
 		params.param0.depcfg.fifo_number = dep->number >> 1;
 
 	if (dwc->speed == USB_SPEED_SUPER) {
