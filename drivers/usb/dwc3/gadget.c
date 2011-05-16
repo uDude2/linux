@@ -298,11 +298,9 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	if (dep->direction)
 		params.param0.depcfg.fifo_number = dep->number >> 1;
 
-	if (dwc->speed == USB_SPEED_SUPER) {
-		if (desc->bInterval) {
-			params.param1.depcfg.binterval_m1 = desc->bInterval - 1;
-			dep->interval = 1 << (desc->bInterval - 1);
-		}
+	if (desc->bInterval) {
+		params.param1.depcfg.binterval_m1 = desc->bInterval - 1;
+		dep->interval = 1 << (desc->bInterval - 1);
 	}
 
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
