@@ -341,38 +341,8 @@ err0:
  */
 static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 {
-	struct dwc3_gadget_ep_cmd_params params;
-
 	struct dwc3		*dwc = dep->dwc;
-
 	u32			reg;
-
-	int			ret = -ENOMEM;
-
-	memset(&params, 0x00, sizeof(params));
-
-	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
-			DWC3_DEPCMD_DEPSTARTCFG, &params);
-	if (ret) {
-		dev_err(dwc->dev, "failed to start new configuration for %s\n",
-				dep->name);
-		return ret;
-	}
-
-	params.param0.depcfg.ep_type = 0;
-	params.param0.depcfg.ignore_sequence_number = false;
-	params.param0.depcfg.max_packet_size = 0;
-	params.param1.depcfg.xfer_complete_enable = false;
-	params.param1.depcfg.xfer_in_progress_enable = false;
-	params.param1.depcfg.xfer_not_ready_enable = false;
-	params.param1.depcfg.ep_number = dep->number;
-
-	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
-			DWC3_DEPCMD_SETEPCONFIG, &params);
-	if (ret) {
-		dev_err(dwc->dev, "failed to configure %s\n", dep->name);
-		return ret;
-	}
 
 	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 	reg &= ~DWC3_DALEPENA_EP(dep->number);
@@ -684,36 +654,31 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 
 	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
 			dep->number);
+
 	return 0;
 }
 
 static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 {
-	struct dwc3		*dwc = dep->dwc;
-
 	req->request.actual	= 0;
 	req->request.status	= -EINPROGRESS;
 	req->direction		= dep->direction;
 	req->epnum		= dep->number;
 
+	/*
+	 * We only add to our list of requests now and
+	 * start consuming the list once we get XferNotReady
+	 * IRQ.
+	 *
+	 * That way, we avoid doing anything that we don't need
+	 * to do now and defer it until the point we receive a
+	 * particular token from the Host side.
+	 *
+	 * This will also avoid Host cancelling URBs due to too
+	 * many NACKs.
+	 */
 	dwc3_map_buffer_to_dma(req);
 	list_add_tail(&req->list, &dep->request_list);
-
-	if (!usb_endpoint_xfer_isoc(dep->desc) &&
-			!list_empty(&dep->req_queued)) {
-		dev_vdbg(dwc->dev, "%s's request_list isn't singular\n",
-				dep->name);
-		return 0;
-	}
-
-	if (!usb_endpoint_xfer_isoc(dep->desc))
-		return __dwc3_gadget_kick_transfer(dep, 0);
-
-	/* ISOC transfers are initiated via Xfer Not Ready interrupt. */
-	if (!(dep->flags & DWC3_EP_ISOC_RUNNING))
-		return 0;
-
-	dwc3_prepare_trbs(dep, false);
 
 	return 0;
 }
@@ -1239,6 +1204,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		}
 
 		dwc3_endpoint_transfer_complete(dwc, dep, event);
+		dep->flags &= ~DWC3_EP_BUSY;
 		break;
 	case DWC3_DEPEVT_XFERINPROGRESS:
 		if (!usb_endpoint_xfer_isoc(dep->desc)) {
@@ -1250,13 +1216,19 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		dwc3_endpoint_transfer_complete(dwc, dep, event);
 		break;
 	case DWC3_DEPEVT_XFERNOTREADY:
-		if (!usb_endpoint_xfer_isoc(dep->desc)) {
-			dev_dbg(dwc->dev, "%s is not an Isochronous endpoint\n",
-					dep->name);
+		if (dep->flags & DWC3_EP_BUSY)
 			return;
+
+		dep->flags |= DWC3_EP_BUSY;
+
+		if (usb_endpoint_xfer_isoc(dep->desc)) {
+			dep->flags &= ~DWC3_EP_ISOC_RUNNING;
+			dwc3_gadget_start_isoc(dwc, dep, event);
+		} else {
+			if (__dwc3_gadget_kick_transfer(dep, 0))
+				dev_dbg(dwc->dev, "%s: failed to kick transfers\n",
+						dep->name);
 		}
-		dep->flags &= ~DWC3_EP_ISOC_RUNNING;
-		dwc3_gadget_start_isoc(dwc, dep, event);
 
 		break;
 	case DWC3_DEPEVT_RXTXFIFOEVT:
