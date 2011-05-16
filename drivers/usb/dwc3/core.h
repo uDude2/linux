@@ -336,6 +336,7 @@ struct dwc3_ep {
 #define DWC3_EP_STALL		(1 << 1)
 #define DWC3_EP_WEDGE		(1 << 2)
 #define DWC3_EP_ISOC_RUNNING	(1 << 3)
+#define DWC3_EP_BUSY		(1 << 4)
 
 	unsigned		current_trb;
 
