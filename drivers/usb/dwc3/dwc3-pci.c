@@ -98,7 +98,7 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 		goto err3;
 	}
 
-	pci_set_drvdata(pci, pci);
+	pci_set_drvdata(pci, glue);
 
 	dwc3->dev.parent = &pci->dev;
 	glue->dev	= &pci->dev;
