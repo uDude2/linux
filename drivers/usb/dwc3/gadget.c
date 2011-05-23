@@ -630,8 +630,10 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 
 	dwc3_prepare_trbs(dep, true);
 	req = next_request(&dep->req_queued);
-	if (!req)
+	if (!req) {
+		dep->flags |= DWC3_EP_PENDING_REQUEST;
 		return 0;
+	}
 
 	memset(&params, 0, sizeof(params));
 	params.param0.depstrtxfer.transfer_desc_addr_high =
@@ -681,6 +683,29 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	 */
 	dwc3_map_buffer_to_dma(req);
 	list_add_tail(&req->list, &dep->request_list);
+
+	/*
+	 * There is one special case: XferNotReady with
+	 * empty list of requests. We need to kick the
+	 * transfer here in that situation, otherwise
+	 * we will be NAKing forever.
+	 *
+	 * If we get XferNotReady before gadget driver
+	 * has a chance to queue a request, we will ACK
+	 * the IRQ but won't be able to receive the data
+	 * until the next request is queued. The following
+	 * code is handling exactly that.
+	 */
+	if (dep->flags & DWC3_EP_PENDING_REQUEST) {
+		dep->flags &= ~DWC3_EP_PENDING_REQUEST;
+
+		if (__dwc3_gadget_kick_transfer(dep, 0)) {
+			struct dwc3	*dwc = dep->dwc;
+
+			dev_dbg(dwc->dev, "%s: failed to kick transfers\n",
+					dep->name);
+		}
+	};
 
 	return 0;
 }
