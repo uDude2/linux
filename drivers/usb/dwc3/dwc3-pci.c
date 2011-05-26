@@ -83,8 +83,7 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 	memset(res, 0x00, sizeof(struct resource) * ARRAY_SIZE(res));
 
 	res[0].start	= pci_resource_start(pci, 0);
-	res[0].end	= pci_resource_start(pci, 0) +
-		pci_resource_len(pci, 0);
+	res[0].end	= pci_resource_end(pci, 0);
 	res[0].name	= "dwc_usb3";
 	res[0].flags	= IORESOURCE_MEM;
 
