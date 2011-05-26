@@ -146,6 +146,7 @@ static DEFINE_PCI_DEVICE_TABLE(dwc3_pci_id_table) = {
 MODULE_DEVICE_TABLE(pci, dwc3_pci_id_table);
 
 static struct pci_driver dwc3_pci_driver = {
+	.name		= "pci-dwc3",
 	.id_table	= dwc3_pci_id_table,
 	.probe		= dwc3_pci_probe,
 	.remove		= __devexit_p(dwc3_pci_remove),
