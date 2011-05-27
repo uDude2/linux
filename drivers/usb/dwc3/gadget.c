@@ -1420,9 +1420,9 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	dwc3_clear_stall_all_ep(dwc);
 
 	/* Reset device address to zero */
-	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
 	reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DEVADDR_MASK));
-	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
 	/*
 	 * Wait for RxFifo to drain
