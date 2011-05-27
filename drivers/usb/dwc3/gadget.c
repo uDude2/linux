@@ -1375,21 +1375,43 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
 }
 
+static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+
+	if (on)
+		reg &= ~DWC3_GUSB3PIPECTL_SUSPHY;
+	else
+		reg |= DWC3_GUSB3PIPECTL_SUSPHY;
+
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+}
+
+static void dwc3_gadget_usb2_phy_power(struct dwc3 *dwc, int on)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+
+	if (on)
+		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+	else
+		reg |= DWC3_GUSB2PHYCFG_SUSPHY;
+
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+}
+
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 {
 	u32			reg;
 
 	dev_vdbg(dwc->dev, "%s\n", __func__);
 
-	/* Enable USB2 PHY */
-	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
-	reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
-	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
-
-	/* Enable USB3 PHY */
-	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
-	reg &= ~DWC3_GUSB3PIPECTL_SUSPHY;
-	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+	/* Enable PHYs */
+	dwc3_gadget_usb2_phy_power(dwc, true);
+	dwc3_gadget_usb3_phy_power(dwc, true);
 
 	if (dwc->gadget.speed != USB_SPEED_UNKNOWN)
 		dwc3_disconnect_gadget(dwc);
@@ -1451,22 +1473,14 @@ static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
 
 static void dwc3_gadget_disable_phy(struct dwc3 *dwc, u8 speed)
 {
-	u32			reg;
-
 	switch (speed) {
 	case USB_SPEED_SUPER:
-		/* Disable USB2 PHY */
-		reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
-		reg |= DWC3_GUSB2PHYCFG_SUSPHY;
-		dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+		dwc3_gadget_usb2_phy_power(dwc, false);
 		break;
 	case USB_SPEED_HIGH:
 	case USB_SPEED_FULL:
 	case USB_SPEED_LOW:
-		/* Disable USB3 PHY */
-		reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
-		reg |= DWC3_GUSB3PIPECTL_SUSPHY;
-		dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+		dwc3_gadget_usb3_phy_power(dwc, false);
 		break;
 	}
 }
