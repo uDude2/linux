@@ -212,7 +212,7 @@ static void dwc3_event_buffers_cleanup(struct dwc3 *dwc)
  */
 static int __devinit dwc3_core_init(struct dwc3 *dwc)
 {
-	unsigned long		timeout = jiffies_to_msecs(jiffies + 500);
+	unsigned long		timeout = jiffies + msecs_to_jiffies(500);
 	u32			reg;
 
 	int			ret;
