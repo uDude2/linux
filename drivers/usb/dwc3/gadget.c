@@ -1403,6 +1403,34 @@ static void dwc3_gadget_usb2_phy_power(struct dwc3 *dwc, int on)
 	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 }
 
+static void dwc3_gadget_usb3_phy_reset(struct dwc3 *dwc)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+	reg |= DWC3_GUSB3PIPECTL_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+
+	msleep(10);
+
+	reg &= ~DWC3_GUSB3PIPECTL_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+}
+
+static void dwc3_gadget_usb2_phy_reset(struct dwc3 *dwc)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+
+	msleep(10);
+
+	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), 0x2410);
+}
+
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 {
 	u32			reg;
@@ -1739,6 +1767,10 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	 * REVISIT: Here we should clear all pending IRQs to be
 	 * sure we're starting from a well known location.
 	 */
+
+	/* RESET USB PHYs during initialization */
+	dwc3_gadget_usb2_phy_reset(dwc);
+	dwc3_gadget_usb3_phy_reset(dwc);
 
 	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 
