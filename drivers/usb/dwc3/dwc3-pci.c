@@ -99,6 +99,10 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 
 	pci_set_drvdata(pci, glue);
 
+	dma_set_coherent_mask(&dwc3->dev, pci->dev.coherent_dma_mask);
+
+	dwc3->dev.dma_mask = pci->dev.dma_mask;
+	dwc3->dev.dma_parms = pci->dev.dma_parms;
 	dwc3->dev.parent = &pci->dev;
 	glue->dev	= &pci->dev;
 	glue->dwc3	= dwc3;
