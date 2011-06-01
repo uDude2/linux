@@ -43,6 +43,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/interrupt.h>
+#include <linux/ioport.h>
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
@@ -212,7 +213,7 @@ static void dwc3_event_buffers_cleanup(struct dwc3 *dwc)
  */
 static int __devinit dwc3_core_init(struct dwc3 *dwc)
 {
-	unsigned long		timeout = jiffies_to_msecs(jiffies + 500);
+	unsigned long		timeout = jiffies + msecs_to_jiffies(500);
 	u32			reg;
 
 	int			ret;
@@ -303,16 +304,23 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 		goto err1;
 	}
 
+	res = request_mem_region(res->start, resource_size(res),
+			dev_name(&pdev->dev));
+	if (!res) {
+		dev_err(&pdev->dev, "can't request mem region\n");
+		goto err1;
+	}
+
 	regs = ioremap(res->start, resource_size(res));
 	if (!regs) {
 		dev_err(&pdev->dev, "ioremap failed\n");
-		goto err1;
+		goto err2;
 	}
 
 	irq = platform_get_irq_byname(pdev, "dwc_usb3");
 	if (irq < 0) {
 		dev_err(&pdev->dev, "missing IRQ\n");
-		goto err2;
+		goto err3;
 	}
 
 	spin_lock_init(&dwc->lock);
@@ -326,36 +334,39 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	ret = dwc3_core_init(dwc);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to initialize core\n");
-		goto err2;
+		goto err3;
 	}
 
 	if (features & DWC3_HAS_PERIPHERAL) {
 		ret = dwc3_gadget_init(dwc);
 		if (ret) {
 			dev_err(&pdev->dev, "failed to initialized gadget\n");
-			goto err3;
+			goto err4;
 		}
 	}
 
 	ret = dwc3_debugfs_init(dwc);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to initialize debugfs\n");
-		goto err4;
+		goto err5;
 	}
 
 	pm_runtime_allow(&pdev->dev);
 
 	return 0;
 
-err4:
+err5:
 	if (features & DWC3_HAS_PERIPHERAL)
 		dwc3_gadget_exit(dwc);
 
-err3:
+err4:
 	dwc3_core_exit(dwc);
 
-err2:
+err3:
 	iounmap(regs);
+
+err2:
+	release_mem_region(res->start, resource_size(res));
 
 err1:
 	kfree(dwc->mem);
@@ -368,7 +379,10 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 {
 	const struct platform_device_id *id = platform_get_device_id(pdev);
 	struct dwc3	*dwc = platform_get_drvdata(pdev);
+	struct resource	*res;
 	unsigned int	features = id->driver_data;
+
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dwc_usb3");
 
 	pm_runtime_put(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
@@ -379,6 +393,7 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 		dwc3_gadget_exit(dwc);
 
 	dwc3_core_exit(dwc);
+	release_mem_region(res->start, resource_size(res));
 	iounmap(dwc->regs);
 	kfree(dwc->mem);
 

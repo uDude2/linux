@@ -83,8 +83,7 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 	memset(res, 0x00, sizeof(struct resource) * ARRAY_SIZE(res));
 
 	res[0].start	= pci_resource_start(pci, 0);
-	res[0].end	= pci_resource_start(pci, 0) +
-		pci_resource_len(pci, 0);
+	res[0].end	= pci_resource_end(pci, 0);
 	res[0].name	= "dwc_usb3";
 	res[0].flags	= IORESOURCE_MEM;
 
@@ -100,6 +99,10 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 
 	pci_set_drvdata(pci, glue);
 
+	dma_set_coherent_mask(&dwc3->dev, pci->dev.coherent_dma_mask);
+
+	dwc3->dev.dma_mask = pci->dev.dma_mask;
+	dwc3->dev.dma_parms = pci->dev.dma_parms;
 	dwc3->dev.parent = &pci->dev;
 	glue->dev	= &pci->dev;
 	glue->dwc3	= dwc3;
@@ -146,6 +149,7 @@ static DEFINE_PCI_DEVICE_TABLE(dwc3_pci_id_table) = {
 MODULE_DEVICE_TABLE(pci, dwc3_pci_id_table);
 
 static struct pci_driver dwc3_pci_driver = {
+	.name		= "pci-dwc3",
 	.id_table	= dwc3_pci_id_table,
 	.probe		= dwc3_pci_probe,
 	.remove		= __devexit_p(dwc3_pci_remove),

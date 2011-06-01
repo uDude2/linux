@@ -287,6 +287,8 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 	dma_set_coherent_mask(&dwc3->dev, pdev->dev.coherent_dma_mask);
 
 	dwc3->dev.parent = &pdev->dev;
+	dwc3->dev.dma_mask = pdev->dev.dma_mask;
+	dwc3->dev.dma_parms = pdev->dev.dma_parms;
 	omap->dev	= &pdev->dev;
 	omap->irq	= irq;
 	omap->base	= base;
