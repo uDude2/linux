@@ -1324,10 +1324,6 @@ static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 		dwc3_gadget_nuke(dep, -ESHUTDOWN);
 
 	}
-
-	/* begin to receive SETUP packets */
-	dwc->ep0state = EP0_IDLE;
-	dwc3_ep0_out_start(dwc);
 }
 
 static void dwc3_clear_stall_all_ep(struct dwc3 *dwc)
@@ -1470,8 +1466,6 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	while (!(dwc3_readl(dwc->regs, DWC3_DSTS)
 				& DWC3_DSTS_RXFIFOEMPTY))
 		cpu_relax();
-
-	dwc->ep0state = EP0_IDLE;
 }
 
 static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
