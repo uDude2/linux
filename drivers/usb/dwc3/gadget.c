@@ -1324,10 +1324,6 @@ static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 		dwc3_gadget_nuke(dep, -ESHUTDOWN);
 
 	}
-
-	/* begin to receive SETUP packets */
-	dwc->ep0state = EP0_IDLE;
-	dwc3_ep0_out_start(dwc);
 }
 
 static void dwc3_clear_stall_all_ep(struct dwc3 *dwc)
@@ -1382,9 +1378,11 @@ static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
 	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
 
 	if (on)
-		reg &= ~DWC3_GUSB3PIPECTL_SUSPHY;
+		reg &= ~(DWC3_GUSB3PIPECTL_SUSPHY |
+				DWC3_GUSB3PIPECTL_PHYSOFTRST);
 	else
-		reg |= DWC3_GUSB3PIPECTL_SUSPHY;
+		reg |= (DWC3_GUSB3PIPECTL_SUSPHY |
+				DWC3_GUSB3PIPECTL_PHYSOFTRST);
 
 	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
 }
@@ -1396,11 +1394,41 @@ static void dwc3_gadget_usb2_phy_power(struct dwc3 *dwc, int on)
 	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
 
 	if (on)
-		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+		reg &= ~(DWC3_GUSB2PHYCFG_SUSPHY |
+				DWC3_GUSB2PHYCFG_PHYSOFTRST);
 	else
-		reg |= DWC3_GUSB2PHYCFG_SUSPHY;
+		reg |= (DWC3_GUSB2PHYCFG_SUSPHY |
+				DWC3_GUSB2PHYCFG_PHYSOFTRST);
 
 	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+}
+
+static void dwc3_gadget_usb3_phy_reset(struct dwc3 *dwc)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+	reg |= DWC3_GUSB3PIPECTL_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+
+	msleep(10);
+
+	reg &= ~DWC3_GUSB3PIPECTL_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+}
+
+static void dwc3_gadget_usb2_phy_reset(struct dwc3 *dwc)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+
+	msleep(10);
+
+	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), 0x2410);
 }
 
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
@@ -1442,8 +1470,6 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	while (!(dwc3_readl(dwc->regs, DWC3_DSTS)
 				& DWC3_DSTS_RXFIFOEMPTY))
 		cpu_relax();
-
-	dwc->ep0state = EP0_IDLE;
 }
 
 static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
@@ -1740,6 +1766,10 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	 * sure we're starting from a well known location.
 	 */
 
+	/* RESET USB PHYs during initialization */
+	dwc3_gadget_usb2_phy_reset(dwc);
+	dwc3_gadget_usb3_phy_reset(dwc);
+
 	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 
 	/*
@@ -1749,7 +1779,10 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	reg |= DWC3_GCTL_PWRDNSCALE(0x61a) | DWC3_GCTL_DISSCRAMBLE;
 	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
 
-	dwc3_writel(dwc->regs, DWC3_DCFG, DWC3_DCFG_SUPERSPEED);
+	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
+	reg &= ~(DWC3_DCFG_SPEED_MASK);
+	reg |= DWC3_DCFG_SUPERSPEED;
+	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
 	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)
