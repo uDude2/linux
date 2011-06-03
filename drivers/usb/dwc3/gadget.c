@@ -1781,7 +1781,10 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	reg |= DWC3_GCTL_PWRDNSCALE(0x61a) | DWC3_GCTL_DISSCRAMBLE;
 	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
 
-	dwc3_writel(dwc->regs, DWC3_DCFG, DWC3_DCFG_SUPERSPEED);
+	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
+	reg &= ~(DWC3_DCFG_SPEED_MASK);
+	reg |= DWC3_DCFG_SUPERSPEED;
+	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
 	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)
