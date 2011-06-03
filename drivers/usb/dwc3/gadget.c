@@ -1840,11 +1840,11 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 		goto err7;
 	}
 
-	dwc3_gadget_run_stop(dwc, true);
-
 	/* begin to receive SETUP packets */
 	dwc->ep0state = EP0_IDLE;
 	dwc3_ep0_out_start(dwc);
+
+	dwc3_gadget_run_stop(dwc, true);
 
 	ret = usb_add_gadget_udc(dwc->dev, &dwc->gadget);
 	if (ret) {
