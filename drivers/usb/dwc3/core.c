@@ -181,8 +181,10 @@ static int __devinit dwc3_event_buffers_setup(struct dwc3 *dwc)
 		dev_dbg(dwc->dev, "Event buf %p dma %u length %d\n",
 				evt->buf, evt->dma, evt->length);
 
-		dwc3_writel(dwc->regs, DWC3_GEVNTADRLO(n), evt->dma);
-		dwc3_writel(dwc->regs, DWC3_GEVNTADRHI(n), 0);
+		dwc3_writel(dwc->regs, DWC3_GEVNTADRLO(n),
+				lower_32_bits(evt->dma));
+		dwc3_writel(dwc->regs, DWC3_GEVNTADRHI(n),
+				upper_32_bits(evt->dma));
 		dwc3_writel(dwc->regs, DWC3_GEVNTSIZ(n),
 				evt->length & 0xffff);
 		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(n), 0);
