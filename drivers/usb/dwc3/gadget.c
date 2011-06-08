@@ -1428,7 +1428,7 @@ static void dwc3_gadget_usb2_phy_reset(struct dwc3 *dwc)
 	msleep(10);
 
 	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
-	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), 0x2410);
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 }
 
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
