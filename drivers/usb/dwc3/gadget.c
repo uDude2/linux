@@ -1042,7 +1042,7 @@ static const struct usb_gadget_ops dwc3_gadget_ops = {
 
 /* -------------------------------------------------------------------------- */
 
-static int __init dwc3_gadget_init_endpoints(struct dwc3 *dwc)
+static int __devinit dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 {
 	struct dwc3_ep			*dep;
 	u8				epnum;
