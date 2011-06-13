@@ -380,7 +380,7 @@ MODULE_AUTHOR("Felipe Balbi <balbi@ti.com>");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("DesignWare USB3 OMAP Glue Layer");
 
-static int __init dwc3_omap_init(void)
+static int __devinit dwc3_omap_init(void)
 {
 	return platform_driver_register(&dwc3_omap_driver);
 }
