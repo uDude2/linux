@@ -1830,6 +1830,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	ret = device_register(&dwc->gadget.dev);
 	if (ret) {
 		dev_err(dwc->dev, "failed to register gadget device\n");
+		put_device(&dwc->gadget.dev);
 		goto err7;
 	}
 
@@ -1843,7 +1844,6 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 
 err7:
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0);
-	put_device(&dwc->gadget.dev);
 
 err6:
 	__dwc3_gadget_ep_disable(dwc->eps[1]);
