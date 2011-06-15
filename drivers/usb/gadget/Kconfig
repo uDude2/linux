@@ -386,6 +386,24 @@ config USB_PXA_U2O
 	default USB_GADGET
 	select USB_GADGET_SELECTED
 
+config USB_GADGET_DWC3
+	boolean "DesignWare USB3.0 (DRD) Controller"
+	depends on USB_DWC3
+	select USB_GADGET_DUALSPEED
+	select USB_GADGET_SUPERSPEED
+	help
+	  DesignWare USB3.0 controller is a SuperSpeed USB3.0 Controller
+	  which can be configured for peripheral-only, host-only, hub-only
+	  and Dual-Role operation. This Controller was first integrated into
+	  the OMAP5 series of processors. More information about the OMAP5
+	  version of this controller, refer to http://www.ti.com/omap5.
+
+config USB_DWC3_GADGET
+	tristate
+	depends on USB_GADGET_DWC3
+	default USB_GADGET
+	select USB_GADGET_SELECTED
+
 #
 # Controllers available in both integrated and discrete versions
 #
@@ -477,6 +495,35 @@ config USB_GADGET_CI13XXX_PCI
 config USB_CI13XXX_PCI
 	tristate
 	depends on USB_GADGET_CI13XXX_PCI
+	default USB_GADGET
+	select USB_GADGET_SELECTED
+
+config USB_GADGET_NET2272
+	boolean "PLX NET2272"
+	select USB_GADGET_DUALSPEED
+	help
+	  PLX NET2272 is a USB peripheral controller which supports
+	  both full and high speed USB 2.0 data transfers.
+
+	  It has three configurable endpoints, as well as endpoint zero
+	  (for control transfer).
+	  Say "y" to link the driver statically, or "m" to build a
+	  dynamically linked module called "net2272" and force all
+	  gadget drivers to also be dynamically linked.
+
+config USB_GADGET_NET2272_DMA
+	boolean "Support external DMA controller"
+	depends on USB_GADGET_NET2272
+	help
+	  The NET2272 part can optionally support an external DMA
+	  controller, but your board has to have support in the
+	  driver itself.
+
+	  If unsure, say "N" here.  The driver works fine in PIO mode.
+
+config USB_NET2272
+	tristate
+	depends on USB_GADGET_NET2272
 	default USB_GADGET
 	select USB_GADGET_SELECTED
 
@@ -602,6 +649,7 @@ config USB_GADGET_DUMMY_HCD
 	boolean "Dummy HCD (DEVELOPMENT)"
 	depends on USB=y || (USB=m && USB_GADGET=m)
 	select USB_GADGET_DUALSPEED
+	select USB_GADGET_SUPERSPEED
 	help
 	  This host controller driver emulates USB, looping all data transfer
 	  requests back to a USB "gadget driver" in the same host.  The host
@@ -636,6 +684,19 @@ endchoice
 config USB_GADGET_DUALSPEED
 	bool
 	depends on USB_GADGET
+
+# Selected by UDC drivers that support super-speed opperation
+config USB_GADGET_SUPERSPEED
+	bool
+	depends on USB_GADGET
+	depends on USB_GADGET_DUALSPEED
+
+config USB_GADGET_SUPERSPEED
+	bool
+	depends on USB_GADGET
+	help
+	  Means the gadget drivers should include extra descriptors
+	  and code to handle SuperSpeed Peripheral Controllers.
 
 #
 # USB Gadget Drivers
