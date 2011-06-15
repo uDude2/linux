@@ -1033,11 +1033,17 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 	return 0;
 }
 
+static int dwc3_gadget_start(struct usb_gadget_driver *driver,
+		int (*bind)(struct usb_gadget *));
+static int dwc3_gadget_stop(struct usb_gadget_driver *driver);
+
 static const struct usb_gadget_ops dwc3_gadget_ops = {
 	.get_frame		= dwc3_gadget_get_frame,
 	.wakeup			= dwc3_gadget_wakeup,
 	.set_selfpowered	= dwc3_gadget_set_selfpowered,
 	.pullup			= dwc3_gadget_pullup,
+	.start			= dwc3_gadget_start,
+	.stop			= dwc3_gadget_stop,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1840,8 +1846,16 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dwc->ep0state = EP0_IDLE;
 	dwc3_ep0_out_start(dwc);
 
+	ret = usb_add_gadget_udc(dwc->dev, &dwc->gadget);
+	if (ret) {
+		dev_err(dwc->dev, "failed to register udc\n");
+		goto err8;
+	}
 	return 0;
 
+err8:
+	dwc3_gadget_run_stop(dwc, false);
+	device_unregister(&dwc->gadget.dev);
 err7:
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0);
 
@@ -1876,6 +1890,7 @@ void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
 	int			irq;
 	int			i;
 
+	usb_del_gadget_udc(&dwc->gadget);
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
 	free_irq(irq, dwc);
@@ -1906,7 +1921,7 @@ void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
  * @driver: the gadget driver to register and probe
  * @bind: the bind function
  */
-int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
+static int dwc3_gadget_start(struct usb_gadget_driver *driver,
 		int (*bind)(struct usb_gadget *))
 {
 	struct dwc3		*dwc = the_dwc;
@@ -1959,13 +1974,12 @@ err1:
 err0:
 	return ret;
 }
-EXPORT_SYMBOL_GPL(usb_gadget_probe_driver);
 
 /**
  * usb_gadget_unregister_driver - unregisters a gadget driver.
  * @driver: the gadget driver to unregister
  */
-int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
+static int dwc3_gadget_stop(struct usb_gadget_driver *driver)
 {
 	struct dwc3		*dwc = the_dwc;
 	unsigned long		flags;
@@ -1991,4 +2005,3 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(usb_gadget_unregister_driver);
