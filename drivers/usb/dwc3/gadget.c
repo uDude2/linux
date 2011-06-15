@@ -1090,7 +1090,7 @@ static int __devinit dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 	return 0;
 }
 
-static void __devexit dwc3_gadget_free_endpoints(struct dwc3 *dwc)
+static void dwc3_gadget_free_endpoints(struct dwc3 *dwc)
 {
 	struct dwc3_ep			*dep;
 	u8				epnum;
@@ -1885,7 +1885,7 @@ err0:
 	return ret;
 }
 
-void __devexit dwc3_gadget_exit(struct dwc3 *dwc)
+void dwc3_gadget_exit(struct dwc3 *dwc)
 {
 	int			irq;
 	int			i;
