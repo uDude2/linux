@@ -1842,6 +1842,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	return 0;
 
 err7:
+	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0);
 	put_device(&dwc->gadget.dev);
 
 err6:
