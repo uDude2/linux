@@ -32,7 +32,6 @@
  * @dev - the child device to the actual controller
  * @gadget - the gadget. For use by the class code
  * @list - for use by the udc class driver
- * @name - a human friendly name representation
  *
  * This represents the internal data structure which is used by the UDC-class
  * to hold information about udc driver and gadget together.
@@ -53,19 +52,22 @@ static DEFINE_MUTEX(udc_lock);
 
 /**
  * usb_gadget_start - tells usb device controller to start up
- * @gadget: The device we want to get started
+ * @gadget: The gadget we want to get started
+ * @driver: The driver we want to bind to @gadget
+ * @bind: The bind function for @drv
  *
  * This call is issued by the UDC Class driver when it's about
  * to register a gadget driver to the device controller, before
  * calling gadget driver's bind() method.
  *
- * It allows the controller to be powered off until extrictly
+ * It allows the controller to be powered off until strictly
  * necessary to have it powered on.
  *
  * Returns zero on success, else negative errno.
  */
 static inline int usb_gadget_start(struct usb_gadget *gadget,
-		struct usb_gadget_driver *drv, int (*bind)(struct usb_gadget *))
+		struct usb_gadget_driver *driver,
+		int (*bind)(struct usb_gadget *))
 {
 	return gadget->ops->start(drv, bind);
 }
@@ -73,6 +75,7 @@ static inline int usb_gadget_start(struct usb_gadget *gadget,
 /**
  * usb_gadget_stop - tells usb device controller we don't need it anymore
  * @gadget: The device we want to stop activity
+ * @driver: The driver to unbind from @gadget
  *
  * This call is issued by the UDC Class driver after calling
  * gadget driver's unbind() method.
@@ -137,8 +140,8 @@ int usb_add_gadget_udc(struct device *parent, struct usb_gadget *gadget)
 	if (ret)
 		goto err3;
 
-	kobject_uevent(&udc->dev.kobj, KOBJ_ADD);
 	mutex_unlock(&udc_lock);
+
 	return 0;
 err3:
 	list_del(&udc->list);
@@ -146,6 +149,7 @@ err3:
 
 err2:
 	put_device(&udc->dev);
+
 err1:
 	return ret;
 }
@@ -166,7 +170,7 @@ static void usb_gadget_remove_driver(struct usb_udc *udc)
 
 /**
  * usb_del_gadget_udc - deletes @udc from udc_list
- * @udc: the udc to be removed.
+ * @gadget: the gadget to be removed.
  *
  * This, will call usb_gadget_unregister_driver() if
  * the @udc is still busy.
@@ -175,8 +179,6 @@ void usb_del_gadget_udc(struct usb_gadget *gadget)
 {
 	struct usb_udc		*udc = NULL;
 
-	dev_vdbg(gadget->dev.parent, "unregistering gadget\n");
-
 	mutex_lock(&udc_lock);
 	list_for_each_entry(udc, &udc_list, list)
 		if (udc->gadget == gadget)
@@ -184,8 +186,12 @@ void usb_del_gadget_udc(struct usb_gadget *gadget)
 
 	dev_err(gadget->dev.parent, "gadget not registered.\n");
 	mutex_unlock(&udc_lock);
+
 	return;
+
 found:
+	dev_vdbg(gadget->dev.parent, "unregistering gadget\n");
+
 	list_del(&udc->list);
 	mutex_unlock(&udc_lock);
 
