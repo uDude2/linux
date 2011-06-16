@@ -54,7 +54,7 @@ static DEFINE_MUTEX(udc_lock);
  * usb_gadget_start - tells usb device controller to start up
  * @gadget: The gadget we want to get started
  * @driver: The driver we want to bind to @gadget
- * @bind: The bind function for @drv
+ * @bind: The bind function for @driver
  *
  * This call is issued by the UDC Class driver when it's about
  * to register a gadget driver to the device controller, before
@@ -69,7 +69,7 @@ static inline int usb_gadget_start(struct usb_gadget *gadget,
 		struct usb_gadget_driver *driver,
 		int (*bind)(struct usb_gadget *))
 {
-	return gadget->ops->start(drv, bind);
+	return gadget->ops->start(driver, bind);
 }
 
 /**
