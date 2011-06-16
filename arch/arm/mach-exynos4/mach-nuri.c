@@ -43,6 +43,7 @@
 #include <plat/iic.h>
 #include <plat/mfc.h>
 #include <plat/pd.h>
+#include <plat/adc-ntc.h>
 
 #include <mach/map.h>
 
@@ -1101,6 +1102,7 @@ static struct platform_device *nuri_devices[] __initdata = {
 	&s3c_device_i2c3,
 	&i2c9_gpio,
 	&s3c_device_adc,
+	&s3c_device_adc_ntc_thermistor,
 	&s3c_device_rtc,
 	&s5p_device_mfc,
 	&s5p_device_mfc_l,
@@ -1144,6 +1146,8 @@ static void __init nuri_machine_init(void)
 
 	nuri_ehci_init();
 	clk_xusbxti.rate = 24000000;
+
+	s3c_adc_ntc_init(6); /* NTC Thermistor uses ADC port 6 */
 
 	/* Last */
 	platform_add_devices(nuri_devices, ARRAY_SIZE(nuri_devices));
