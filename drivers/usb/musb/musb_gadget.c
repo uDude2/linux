@@ -1524,6 +1524,12 @@ static void musb_gadget_fifo_flush(struct usb_ep *ep)
 		csr = musb_readw(epio, MUSB_TXCSR);
 		if (csr & MUSB_TXCSR_FIFONOTEMPTY) {
 			csr |= MUSB_TXCSR_FLUSHFIFO | MUSB_TXCSR_P_WZC_BITS;
+			/*
+			 * Setting both TXPKTRDY and FLUSHFIFO makes controller
+			 * to interrupt current FIFO loading, but not flushing
+			 * the already loaded ones.
+			 */
+			csr &= ~MUSB_TXCSR_TXPKTRDY;
 			musb_writew(epio, MUSB_TXCSR, csr);
 			/* REVISIT may be inappropriate w/o FIFONOTEMPTY ... */
 			musb_writew(epio, MUSB_TXCSR, csr);
@@ -1954,6 +1960,10 @@ static int musb_gadget_start(struct usb_gadget_driver *driver,
 		if (retval < 0) {
 			dev_dbg(musb->controller, "add_hcd failed, %d\n", retval);
 			goto err2;
+
+			if ((musb->xceiv->last_event == USB_EVENT_ID)
+						&& musb->xceiv->set_vbus)
+				otg_set_vbus(musb->xceiv, 1);
 		}
 
 		if ((musb->xceiv->last_event == USB_EVENT_ID)
