@@ -27,7 +27,7 @@
 #include <linux/utsname.h>
 
 #include <linux/usb/composite.h>
-#include <linux/unaligned/access_ok.h>
+#include <asm/unaligned.h>
 
 /*
  * The code in this file is utility code, used to build a gadget driver
