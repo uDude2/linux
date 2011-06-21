@@ -886,7 +886,7 @@ static struct usb_endpoint_descriptor dwc3_gadget_ep0_desc = {
 	.bDescriptorType = USB_DT_ENDPOINT,
 	.bEndpointAddress = 0,
 	.bmAttributes	= USB_ENDPOINT_XFER_CONTROL,
-	.wMaxPacketSize	= -EINVAL,	/* Fixed up later */
+	.wMaxPacketSize	= 0,	/* Fixed up later */
 };
 
 static const struct usb_ep_ops dwc3_gadget_ep0_ops = {
@@ -1571,7 +1571,7 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	switch (speed) {
 	case DWC3_DCFG_SUPERSPEED:
-		dwc3_gadget_ep0_desc.wMaxPacketSize = 512;
+		dwc3_gadget_ep0_desc.wMaxPacketSize = 9;
 		dwc->gadget.speed = USB_SPEED_SUPER;
 		break;
 	case DWC3_DCFG_HIGHSPEED:
@@ -1829,7 +1829,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 		goto err3;
 
 	/* Start with SuperSpeed Default */
-	dwc3_gadget_ep0_desc.wMaxPacketSize = 512;
+	dwc3_gadget_ep0_desc.wMaxPacketSize = 9;
 
 	dep = dwc->eps[0];
 	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, false);
