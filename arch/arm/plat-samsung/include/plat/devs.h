@@ -64,6 +64,7 @@ extern struct platform_device s3c_device_i2c6;
 extern struct platform_device s3c_device_i2c7;
 extern struct platform_device s3c_device_rtc;
 extern struct platform_device s3c_device_adc;
+extern struct platform_device s3c_device_adc_ntc_thermistor;
 extern struct platform_device s3c_device_sdi;
 extern struct platform_device s3c_device_iis;
 extern struct platform_device s3c_device_hwmon;
