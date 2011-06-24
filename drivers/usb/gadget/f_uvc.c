@@ -649,7 +649,7 @@ uvc_bind_config(struct usb_configuration *c,
 	if (ret)
 		kfree(uvc);
 
-	return 0;
+	return ret;
 
 error:
 	kfree(uvc);
