@@ -5,7 +5,7 @@ obj-$(CONFIG_USB_DWC3)			+= dwc3.o
 
 dwc3-y					:= core.o
 
-ifneq ($(CONFIG_USB_DWC3_GADGET),)
+ifneq ($(CONFIG_USB_GADGET_DWC3),)
 	dwc3-y				+= gadget.o ep0.o
 endif
 
