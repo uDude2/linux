@@ -340,6 +340,11 @@ static struct usb_composite_driver zero_driver = {
 	.name		= "zero",
 	.dev		= &device_desc,
 	.strings	= dev_strings,
+#ifdef CONFIG_USB_GADGET_DUALSPEED
+	.max_speed	= USB_SPEED_HIGH,
+#else
+	.max_speed	= USB_SPEED_FULL,
+#endif /* CONFIG_USB_GADGET_DUALSPEED */
 	.unbind		= zero_unbind,
 	.suspend	= zero_suspend,
 	.resume		= zero_resume,

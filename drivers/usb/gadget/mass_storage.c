@@ -169,6 +169,11 @@ static struct usb_composite_driver msg_driver = {
 	.name		= "g_mass_storage",
 	.dev		= &msg_device_desc,
 	.iProduct	= DRIVER_DESC,
+#ifdef CONFIG_USB_GADGET_DUALSPEED
+	.max_speed	= USB_SPEED_HIGH,
+#else
+	.max_speed	= USB_SPEED_FULL,
+#endif /* CONFIG_USB_GADGET_DUALSPEED */
 	.needs_serial	= 1,
 };
 
