@@ -44,7 +44,6 @@ struct usb_udc {
 };
 
 static struct class *udc_class;
-static struct device_type udc_device_type;
 static LIST_HEAD(udc_list);
 static DEFINE_MUTEX(udc_lock);
 
@@ -73,6 +72,26 @@ static inline int usb_gadget_start(struct usb_gadget *gadget,
 }
 
 /**
+ * usb_gadget_udc_start - tells usb device controller to start up
+ * @gadget: The gadget we want to get started
+ * @driver: The driver we want to bind to @gadget
+ *
+ * This call is issued by the UDC Class driver when it's about
+ * to register a gadget driver to the device controller, before
+ * calling gadget driver's bind() method.
+ *
+ * It allows the controller to be powered off until strictly
+ * necessary to have it powered on.
+ *
+ * Returns zero on success, else negative errno.
+ */
+static inline int usb_gadget_udc_start(struct usb_gadget *gadget,
+		struct usb_gadget_driver *driver)
+{
+	return gadget->ops->udc_start(gadget, driver);
+}
+
+/**
  * usb_gadget_stop - tells usb device controller we don't need it anymore
  * @gadget: The device we want to stop activity
  * @driver: The driver to unbind from @gadget
@@ -91,6 +110,24 @@ static inline void usb_gadget_stop(struct usb_gadget *gadget,
 }
 
 /**
+ * usb_gadget_udc_stop - tells usb device controller we don't need it anymore
+ * @gadget: The device we want to stop activity
+ * @driver: The driver to unbind from @gadget
+ *
+ * This call is issued by the UDC Class driver after calling
+ * gadget driver's unbind() method.
+ *
+ * The details are implementation specific, but it can go as
+ * far as powering off UDC completely and disable its data
+ * line pullups.
+ */
+static inline void usb_gadget_udc_stop(struct usb_gadget *gadget,
+		struct usb_gadget_driver *driver)
+{
+	gadget->ops->udc_stop(gadget, driver);
+}
+
+/**
  * usb_udc_release - release the usb_udc struct
  * @dev: the dev member within usb_udc
  *
@@ -106,6 +143,7 @@ static void usb_udc_release(struct device *dev)
 	kfree(udc);
 }
 
+static const struct attribute_group *usb_udc_attr_groups[];
 /**
  * usb_add_gadget_udc - adds a new gadget to the udc class driver list
  * @parent: the parent device to this udc. Usually the controller
@@ -126,6 +164,7 @@ int usb_add_gadget_udc(struct device *parent, struct usb_gadget *gadget)
 	device_initialize(&udc->dev);
 	udc->dev.release = usb_udc_release;
 	udc->dev.class = udc_class;
+	udc->dev.groups = usb_udc_attr_groups;
 	udc->dev.parent = parent;
 	ret = dev_set_name(&udc->dev, "%s", kobject_name(&parent->kobj));
 	if (ret)
@@ -155,6 +194,14 @@ err1:
 }
 EXPORT_SYMBOL_GPL(usb_add_gadget_udc);
 
+static int udc_is_newstyle(struct usb_udc *udc)
+{
+	if (udc->gadget->ops->udc_start && udc->gadget->ops->udc_stop)
+		return 1;
+	return 0;
+}
+
+
 static void usb_gadget_remove_driver(struct usb_udc *udc)
 {
 	dev_dbg(&udc->dev, "unregistering UDC driver [%s]\n",
@@ -162,7 +209,14 @@ static void usb_gadget_remove_driver(struct usb_udc *udc)
 
 	kobject_uevent(&udc->dev.kobj, KOBJ_CHANGE);
 
-	usb_gadget_stop(udc->gadget, udc->driver);
+	if (udc_is_newstyle(udc)) {
+		usb_gadget_disconnect(udc->gadget);
+		udc->driver->unbind(udc->gadget);
+		usb_gadget_udc_stop(udc->gadget, udc->driver);
+
+	} else {
+		usb_gadget_stop(udc->gadget, udc->driver);
+	}
 
 	udc->driver = NULL;
 	udc->dev.driver = NULL;
@@ -232,9 +286,23 @@ found:
 	udc->driver = driver;
 	udc->dev.driver = &driver->driver;
 
-	ret = usb_gadget_start(udc->gadget, driver, bind);
-	if (ret)
-		goto err1;
+	if (udc_is_newstyle(udc)) {
+		ret = bind(udc->gadget);
+		if (ret)
+			goto err1;
+		ret = usb_gadget_udc_start(udc->gadget, driver);
+		if (ret) {
+			driver->unbind(udc->gadget);
+			goto err1;
+		}
+		usb_gadget_connect(udc->gadget);
+	} else {
+
+		ret = usb_gadget_start(udc->gadget, driver, bind);
+		if (ret)
+			goto err1;
+
+	}
 
 	kobject_uevent(&udc->dev.kobj, KOBJ_CHANGE);
 	mutex_unlock(&udc_lock);
@@ -306,7 +374,7 @@ static DEVICE_ATTR(soft_connect, S_IWUSR, NULL, usb_udc_softconn_store);
 static ssize_t usb_udc_speed_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct usb_udc		*udc = dev_get_drvdata(dev);
+	struct usb_udc		*udc = container_of(dev, struct usb_udc, dev);
 	struct usb_gadget	*gadget = udc->gadget;
 
 	switch (gadget->speed) {
@@ -331,7 +399,7 @@ static DEVICE_ATTR(speed, S_IRUSR, usb_udc_speed_show, NULL);
 ssize_t usb_udc_##name##_show(struct device *dev,		\
 		struct device_attribute *attr, char *buf)	\
 {								\
-	struct usb_udc		*udc = dev_get_drvdata(dev);	\
+	struct usb_udc		*udc = container_of(dev, struct usb_udc, dev); \
 	struct usb_gadget	*gadget = udc->gadget;		\
 								\
 	return snprintf(buf, PAGE_SIZE, "%d\n", gadget->name);	\
@@ -401,8 +469,6 @@ static int __init usb_udc_init(void)
 	}
 
 	udc_class->dev_uevent = usb_udc_uevent;
-	udc_device_type.groups = usb_udc_attr_groups;
-
 	return 0;
 }
 subsys_initcall(usb_udc_init);
