@@ -315,12 +315,6 @@ config USB_GADGET_DWC3
 	  the OMAP5 series of processors. More information about the OMAP5
 	  version of this controller, refer to http://www.ti.com/omap5.
 
-config USB_DWC3_GADGET
-	tristate
-	depends on USB_GADGET_DWC3
-	default USB_GADGET
-	select USB_GADGET_SELECTED
-
 #
 # Controllers available in both integrated and discrete versions
 #
