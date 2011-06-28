@@ -1710,6 +1710,10 @@ static int musb_gadget_pullup(struct usb_gadget *gadget, int is_on)
 	return 0;
 }
 
+static int musb_gadget_start(struct usb_gadget_driver *driver,
+		int (*bind)(struct usb_gadget *));
+static int musb_gadget_stop(struct usb_gadget_driver *driver);
+
 static const struct usb_gadget_ops musb_gadget_operations = {
 	.get_frame		= musb_gadget_get_frame,
 	.wakeup			= musb_gadget_wakeup,
@@ -1717,6 +1721,8 @@ static const struct usb_gadget_ops musb_gadget_operations = {
 	/* .vbus_session		= musb_gadget_vbus_session, */
 	.vbus_draw		= musb_gadget_vbus_draw,
 	.pullup			= musb_gadget_pullup,
+	.start			= musb_gadget_start,
+	.stop			= musb_gadget_stop,
 };
 
 /* ----------------------------------------------------------------------- */
@@ -1841,7 +1847,16 @@ int __init musb_gadget_setup(struct musb *musb)
 	if (status != 0) {
 		put_device(&musb->g.dev);
 		the_gadget = NULL;
+		return status;
 	}
+	status = usb_add_gadget_udc(musb->controller, &musb->g);
+	if (status)
+		goto err;
+
+	return 0;
+err:
+	device_unregister(&musb->g.dev);
+	the_gadget = NULL;
 	return status;
 }
 
@@ -1850,6 +1865,7 @@ void musb_gadget_cleanup(struct musb *musb)
 	if (musb != the_gadget)
 		return;
 
+	usb_del_gadget_udc(&musb->g);
 	device_unregister(&musb->g.dev);
 	the_gadget = NULL;
 }
@@ -1866,7 +1882,7 @@ void musb_gadget_cleanup(struct musb *musb)
  * @param bind the driver's bind function
  * @return <0 if error, 0 if everything is fine
  */
-int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
+static int musb_gadget_start(struct usb_gadget_driver *driver,
 		int (*bind)(struct usb_gadget *))
 {
 	struct musb		*musb = the_gadget;
@@ -1968,7 +1984,6 @@ err1:
 err0:
 	return retval;
 }
-EXPORT_SYMBOL(usb_gadget_probe_driver);
 
 static void stop_activity(struct musb *musb, struct usb_gadget_driver *driver)
 {
@@ -2018,7 +2033,7 @@ static void stop_activity(struct musb *musb, struct usb_gadget_driver *driver)
  *
  * @param driver the gadget driver to unregister
  */
-int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
+static int musb_gadget_stop(struct usb_gadget_driver *driver)
 {
 	struct musb	*musb = the_gadget;
 	unsigned long	flags;
@@ -2077,8 +2092,6 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 
 	return 0;
 }
-EXPORT_SYMBOL(usb_gadget_unregister_driver);
-
 
 /* ----------------------------------------------------------------------- */
 
