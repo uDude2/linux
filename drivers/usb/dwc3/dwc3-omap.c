@@ -258,7 +258,7 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, omap);
 
 	irq = platform_get_irq_byname(pdev, "wrapper");
-	if (irq == 0) {
+	if (irq < 0) {
 		dev_err(&pdev->dev, "missing IRQ resource\n");
 		ret = -EINVAL;
 		goto err1;
