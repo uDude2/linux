@@ -1266,12 +1266,8 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 			int ret;
 
 			ret = __dwc3_gadget_kick_transfer(dep, 0);
-			if (!ret)
+			if (!ret || ret == -EBUSY)
 				return;
-			if (ret == -EBUSY) {
-				dep->flags |= DWC3_EP_PENDING_REQUEST;
-				return;
-			}
 
 			dev_dbg(dwc->dev, "%s: failed to kick transfers\n",
 					dep->name);
