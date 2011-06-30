@@ -628,6 +628,10 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	int				ret;
 	u32				cmd;
 
+	if (dep->flags & DWC3_EP_BUSY)
+		return -EBUSY;
+	dep->flags &= ~DWC3_EP_PENDING_REQUEST;
+
 	dwc3_prepare_trbs(dep, true);
 	req = next_request(&dep->req_queued);
 	if (!req) {
@@ -656,6 +660,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 		return ret;
 	}
 
+	dep->flags |= DWC3_EP_BUSY;
 	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
 			dep->number);
 
@@ -697,9 +702,10 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	 * code is handling exactly that.
 	 */
 	if (dep->flags & DWC3_EP_PENDING_REQUEST) {
-		dep->flags &= ~DWC3_EP_PENDING_REQUEST;
+		int ret;
 
-		if (__dwc3_gadget_kick_transfer(dep, 0)) {
+		ret =  __dwc3_gadget_kick_transfer(dep, 0);
+		if (ret && ret != -EBUSY) {
 			struct dwc3	*dwc = dep->dwc;
 
 			dev_dbg(dwc->dev, "%s: failed to kick transfers\n",
@@ -1171,6 +1177,8 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	if (!(event->status & DEPEVT_STATUS_LST))
 		goto out;
 
+	dep->flags &= ~DWC3_EP_BUSY;
+
 	if (list_empty(&dep->request_list))
 		goto out;
 
@@ -1240,7 +1248,6 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		}
 
 		dwc3_endpoint_transfer_complete(dwc, dep, event);
-		dep->flags &= ~DWC3_EP_BUSY;
 		break;
 	case DWC3_DEPEVT_XFERINPROGRESS:
 		if (!usb_endpoint_xfer_isoc(dep->desc)) {
@@ -1252,18 +1259,22 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		dwc3_endpoint_transfer_complete(dwc, dep, event);
 		break;
 	case DWC3_DEPEVT_XFERNOTREADY:
-		if (dep->flags & DWC3_EP_BUSY)
-			return;
-
-		dep->flags |= DWC3_EP_BUSY;
-
 		if (usb_endpoint_xfer_isoc(dep->desc)) {
 			dep->flags &= ~DWC3_EP_ISOC_RUNNING;
 			dwc3_gadget_start_isoc(dwc, dep, event);
 		} else {
-			if (__dwc3_gadget_kick_transfer(dep, 0))
-				dev_dbg(dwc->dev, "%s: failed to kick transfers\n",
-						dep->name);
+			int ret;
+
+			ret = __dwc3_gadget_kick_transfer(dep, 0);
+			if (!ret)
+				return;
+			if (ret == -EBUSY) {
+				dep->flags |= DWC3_EP_PENDING_REQUEST;
+				return;
+			}
+
+			dev_dbg(dwc->dev, "%s: failed to kick transfers\n",
+					dep->name);
 		}
 
 		break;
