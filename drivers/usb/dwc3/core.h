@@ -501,6 +501,7 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
  * @gadget_driver: pointer to the gadget driver
  * @regs: base address for our registers
  * @regs_size: address space size
+ * @irq_count: the number of events we must handle
  * @irq: IRQ number
  * @revision: revision register contents
  * @is_selfpowered: true when we are selfpowered
@@ -533,6 +534,7 @@ struct dwc3 {
 	void __iomem		*regs;
 	size_t			regs_size;
 
+	unsigned		irq_count;
 	int			irq;
 
 	u32			revision;
