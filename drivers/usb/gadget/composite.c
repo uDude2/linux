@@ -1560,7 +1560,7 @@ static struct usb_gadget_driver composite_driver = {
 	.speed		= USB_SPEED_SUPER,
 #else
 	.speed		= USB_SPEED_HIGH,
-#endif /* CONFIG_USB_GADGET_SUPERSPEED */
+#endif
 
 	.unbind		= composite_unbind,
 

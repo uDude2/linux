@@ -1009,10 +1009,15 @@ static void musb_shutdown(struct platform_device *pdev)
  * We don't currently use dynamic fifo setup capability to do anything
  * more than selecting one of a bunch of predefined configurations.
  */
-#if defined(CONFIG_USB_MUSB_TUSB6010) || defined(CONFIG_USB_MUSB_OMAP2PLUS) \
-	|| defined(CONFIG_USB_MUSB_AM35X)
+#if defined(CONFIG_USB_MUSB_TUSB6010)			\
+	|| defined(CONFIG_USB_MUSB_TUSB6010_MODULE)	\
+	|| defined(CONFIG_USB_MUSB_OMAP2PLUS)		\
+	|| defined(CONFIG_USB_MUSB_OMAP2PLUS_MODULE)	\
+	|| defined(CONFIG_USB_MUSB_AM35X)		\
+	|| defined(CONFIG_USB_MUSB_AM35X_MODULE)
 static ushort __initdata fifo_mode = 4;
-#elif defined(CONFIG_USB_MUSB_UX500)
+#elif defined(CONFIG_USB_MUSB_UX500)			\
+	|| defined(CONFIG_USB_MUSB_UX500_MODULE)
 static ushort __initdata fifo_mode = 5;
 #else
 static ushort __initdata fifo_mode = 2;
@@ -1488,7 +1493,7 @@ static irqreturn_t generic_interrupt(int irq, void *__hci)
 	musb->int_rx = musb_readw(musb->mregs, MUSB_INTRRX);
 
 	if (musb->int_usb || musb->int_tx || musb->int_rx)
-		retval = musb_interrupt(musb);
+		retval = IRQ_WAKE_THREAD;
 
 	spin_unlock_irqrestore(&musb->lock, flags);
 
@@ -1506,12 +1511,16 @@ static irqreturn_t generic_interrupt(int irq, void *__hci)
  *
  * called in irq context with spinlock held, irqs blocked
  */
-irqreturn_t musb_interrupt(struct musb *musb)
+static irqreturn_t musb_interrupt(int irq, void *_musb)
 {
+	struct musb	*musb = _musb;
 	irqreturn_t	retval = IRQ_NONE;
+	unsigned long	flags;
 	u8		devctl, power;
 	int		ep_num;
 	u32		reg;
+
+	spin_lock_irqsave(&musb->lock, flags);
 
 	devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
 	power = musb_readb(musb->mregs, MUSB_POWER);
@@ -1519,12 +1528,6 @@ irqreturn_t musb_interrupt(struct musb *musb)
 	dev_dbg(musb->controller, "** IRQ %s usb%04x tx%04x rx%04x\n",
 		(devctl & MUSB_DEVCTL_HM) ? "host" : "peripheral",
 		musb->int_usb, musb->int_tx, musb->int_rx);
-
-	if (is_otg_enabled(musb) || is_peripheral_enabled(musb))
-		if (!musb->gadget_driver) {
-			dev_dbg(musb->controller, "No gadget driver loaded\n");
-			return IRQ_HANDLED;
-		}
 
 	/* the core can interrupt us for multiple reasons; docs have
 	 * a generic interrupt flowchart to follow
@@ -1584,9 +1587,10 @@ irqreturn_t musb_interrupt(struct musb *musb)
 		ep_num++;
 	}
 
+	spin_unlock_irqrestore(&musb->lock, flags);
+
 	return retval;
 }
-EXPORT_SYMBOL_GPL(musb_interrupt);
 
 #ifndef CONFIG_MUSB_PIO_ONLY
 static int __initdata use_dma = 1;
@@ -1944,7 +1948,8 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
 	INIT_WORK(&musb->irq_work, musb_irq_work);
 
 	/* attach to the IRQ */
-	if (request_irq(nIrq, musb->isr, 0, dev_name(dev), musb)) {
+	if (request_threaded_irq(nIrq, musb->isr, musb_interrupt,
+				0, dev_name(dev), musb)) {
 		dev_err(dev, "request_irq %d failed!\n", nIrq);
 		status = -ENODEV;
 		goto fail3;

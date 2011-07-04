@@ -310,7 +310,7 @@ static irqreturn_t am35x_musb_interrupt(int irq, void *hci)
 	}
 
 	if (musb->int_tx || musb->int_rx || musb->int_usb)
-		ret |= musb_interrupt(musb);
+		ret = IRQ_WAKE_THREAD;
 
 eoi:
 	/* EOI needs to be written for the IRQ to be re-asserted. */

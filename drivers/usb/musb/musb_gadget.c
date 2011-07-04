@@ -1663,8 +1663,8 @@ static void musb_pullup(struct musb *musb, int is_on)
 
 	/* FIXME if on, HdrcStart; if off, HdrcStop */
 
-	dev_dbg(musb->controller, "gadget %s D+ pullup %s\n",
-		musb->gadget_driver->function, is_on ? "on" : "off");
+	dev_dbg(musb->controller, "gadget D+ pullup %s\n",
+		is_on ? "on" : "off");
 	musb_writeb(musb->mregs, MUSB_POWER, power);
 }
 
@@ -1887,6 +1887,7 @@ static int musb_gadget_start(struct usb_gadget *g,
 	dev_dbg(musb->controller, "registering driver %s\n", driver->function);
 
 	musb->softconnect = 0;
+	musb->gadget_driver = driver;
 
 	spin_lock_irqsave(&musb->lock, flags);
 	musb->is_active = 1;
@@ -1919,10 +1920,6 @@ static int musb_gadget_start(struct usb_gadget *g,
 		if (retval < 0) {
 			dev_dbg(musb->controller, "add_hcd failed, %d\n", retval);
 			goto err2;
-
-			if ((musb->xceiv->last_event == USB_EVENT_ID)
-						&& musb->xceiv->set_vbus)
-				otg_set_vbus(musb->xceiv, 1);
 		}
 
 		if ((musb->xceiv->last_event == USB_EVENT_ID)
