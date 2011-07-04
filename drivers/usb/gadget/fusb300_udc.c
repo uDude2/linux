@@ -767,56 +767,6 @@ static void fusb300_rdfifo(struct fusb300_ep *ep,
 	} while (!reg);
 }
 
-/* write data to fifo */
-static void fusb300_wrfifo(struct fusb300_ep *ep,
-			   struct fusb300_request *req)
-{
-	int i = 0;
-	u8 *tmp;
-	u32 data, reg;
-	struct fusb300 *fusb300 = ep->fusb300;
-
-	tmp = req->req.buf;
-	req->req.actual = req->req.length;
-
-	for (i = (req->req.length >> 2); i > 0; i--) {
-		data = *tmp | *(tmp + 1) << 8 |
-			*(tmp + 2) << 16 | *(tmp + 3) << 24;
-
-		iowrite32(data, fusb300->reg +
-			FUSB300_OFFSET_EPPORT(ep->epnum));
-		tmp += 4;
-	}
-
-	switch (req->req.length % 4) {
-	case 1:
-		data = *tmp;
-		iowrite32(data, fusb300->reg +
-			FUSB300_OFFSET_EPPORT(ep->epnum));
-		break;
-	case 2:
-		data = *tmp | *(tmp + 1) << 8;
-		iowrite32(data, fusb300->reg +
-			FUSB300_OFFSET_EPPORT(ep->epnum));
-		break;
-	case 3:
-		data = *tmp | *(tmp + 1) << 8 | *(tmp + 2) << 16;
-		iowrite32(data, fusb300->reg +
-			FUSB300_OFFSET_EPPORT(ep->epnum));
-		break;
-	default:
-		break;
-	}
-
-	do {
-		reg = ioread32(fusb300->reg + FUSB300_OFFSET_IGR1);
-		reg &= FUSB300_IGR1_SYNF0_EMPTY_INT;
-		if (i)
-			printk(KERN_INFO"sync fifo is not empty!\n");
-		i++;
-	} while (!reg);
-}
-
 static u8 fusb300_get_epnstall(struct fusb300 *fusb300, u8 ep)
 {
 	u8 value;
@@ -980,11 +930,6 @@ static void set_address(struct fusb300 *fusb300, struct usb_ctrlrequest *ctrl)
 		} \
 	} while (0)
 
-static void fusb300_ep0_complete(struct usb_ep *ep,
-				struct usb_request *req)
-{
-}
-
 static int setup_packet(struct fusb300 *fusb300, struct usb_ctrlrequest *ctrl)
 {
 	u8 *p = (u8 *)ctrl;
@@ -1027,17 +972,6 @@ static int setup_packet(struct fusb300 *fusb300, struct usb_ctrlrequest *ctrl)
 		ret = 1;
 
 	return ret;
-}
-
-static void fusb300_set_ep_bycnt(struct fusb300_ep *ep, u32 bycnt)
-{
-	struct fusb300 *fusb300 = ep->fusb300;
-	u32 reg = ioread32(fusb300->reg + FUSB300_OFFSET_EPFFR(ep->epnum));
-
-	reg &= ~FUSB300_FFR_BYCNT;
-	reg |= bycnt & FUSB300_FFR_BYCNT;
-
-	iowrite32(reg, fusb300->reg + FUSB300_OFFSET_EPFFR(ep->epnum));
 }
 
 static void done(struct fusb300_ep *ep, struct fusb300_request *req,
@@ -1148,14 +1082,8 @@ static void in_ep_fifo_handler(struct fusb300_ep *ep)
 	struct fusb300_request *req = list_entry(ep->queue.next,
 					struct fusb300_request, queue);
 
-	if (req->req.length) {
-#if 0
-		fusb300_set_ep_bycnt(ep, req->req.length);
-		fusb300_wrfifo(ep, req);
-#else
+	if (req->req.length)
 		fusb300_set_idma(ep, req);
-#endif
-	}
 	done(ep, req, 0);
 }
 
@@ -1500,7 +1428,7 @@ static void init_controller(struct fusb300 *fusb300)
 /*------------------------------------------------------------------------*/
 static struct fusb300 *the_controller;
 
-int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
+static int fusb300_udc_start(struct usb_gadget_driver *driver,
 		int (*bind)(struct usb_gadget *))
 {
 	struct fusb300 *fusb300 = the_controller;
@@ -1544,9 +1472,8 @@ error:
 
 	return retval;
 }
-EXPORT_SYMBOL(usb_gadget_probe_driver);
 
-int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
+static int fusb300_udc_stop(struct usb_gadget_driver *driver)
 {
 	struct fusb300 *fusb300 = the_controller;
 
@@ -1562,7 +1489,6 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver)
 
 	return 0;
 }
-EXPORT_SYMBOL(usb_gadget_unregister_driver);
 /*--------------------------------------------------------------------------*/
 
 static int fusb300_udc_pullup(struct usb_gadget *_gadget, int is_active)
@@ -1572,12 +1498,15 @@ static int fusb300_udc_pullup(struct usb_gadget *_gadget, int is_active)
 
 static struct usb_gadget_ops fusb300_gadget_ops = {
 	.pullup		= fusb300_udc_pullup,
+	.start		= fusb300_udc_start,
+	.stop		= fusb300_udc_stop,
 };
 
 static int __exit fusb300_remove(struct platform_device *pdev)
 {
 	struct fusb300 *fusb300 = dev_get_drvdata(&pdev->dev);
 
+	usb_del_gadget_udc(&fusb300->gadget);
 	iounmap(fusb300->reg);
 	free_irq(platform_get_irq(pdev, 0), fusb300);
 
@@ -1702,9 +1631,15 @@ static int __init fusb300_probe(struct platform_device *pdev)
 		goto clean_up3;
 
 	init_controller(fusb300);
+	ret = usb_add_gadget_udc(&pdev->dev, &fusb300->gadget);
+	if (ret)
+		goto err_add_udc;
+
 	dev_info(&pdev->dev, "version %s\n", DRIVER_VERSION);
 
 	return 0;
+err_add_udc:
+	fusb300_free_request(&fusb300->ep[0]->ep, fusb300->ep0_req);
 
 clean_up3:
 	free_irq(ires->start, fusb300);
