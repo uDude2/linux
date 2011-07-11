@@ -1668,18 +1668,19 @@ static void dwc3_process_event_entry(struct dwc3 *dwc,
 	}
 }
 
-static irqreturn_t dwc3_thread_interrupt(int irq, void *_dwc3)
+static irqreturn_t dwc3_process_event_buf(struct dwc3 *dwc, u32 buf)
 {
-	struct dwc3			*dwc = _dwc;
-	struct dwc3_event_buffer	*evt;
+	struct dwc3_event_buffer *evt;
+	int left;
+	u32 count;
 
-	irqreturn_t			ret = IRQ_NONE;
-	int				left;
-
-	spin_lock(&dwc->lock);
+	count = dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(buf));
+	count &= DWC3_GEVNTCOUNT_MASK;
+	if (!count)
+		return IRQ_NONE;
 
 	evt = dwc->ev_buffs[buf];
-	left = dwc3->count;
+	left = count;
 
 	while (left > 0) {
 		union dwc3_event event;
@@ -1699,25 +1700,7 @@ static irqreturn_t dwc3_thread_interrupt(int irq, void *_dwc3)
 		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(buf), 4);
 	}
 
-	dwc3->count = 0;
-
-	spin_unlock(&dwc->lock);
-
 	return IRQ_HANDLED;
-}
-
-static irqreturn_t dwc3_process_event_buf(struct dwc3 *dwc, u32 buf)
-{
-	u32 count;
-
-	count = dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(buf));
-	count &= DWC3_GEVNTCOUNT_MASK;
-	if (!count)
-		return IRQ_NONE;
-
-	dwc3->irq_count = count;
-
-	return IRQ_WAKE_THREAD;
 }
 
 static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
@@ -1732,7 +1715,7 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 		irqreturn_t status;
 
 		status = dwc3_process_event_buf(dwc, i);
-		if (status == IRQ_WAKE_THREAD)
+		if (status == IRQ_HANDLED)
 			ret = status;
 	}
 
@@ -1837,8 +1820,8 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
-	ret = request_threaded_irq(irq, dwc3_interrupt, dwc3_thread_interrupt,
-			IRQF_SHARED, "dwc3", dwc);
+	ret = request_irq(irq, dwc3_interrupt, IRQF_SHARED,
+			"dwc3", dwc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to request irq #%d --> %d\n",
 				irq, ret);
