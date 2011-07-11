@@ -124,11 +124,7 @@ static void am35x_musb_disable(struct musb *musb)
 	musb_writel(reg_base, USB_END_OF_INTR_REG, 0);
 }
 
-#ifdef CONFIG_USB_MUSB_HDRC_HCD
 #define portstate(stmt)		stmt
-#else
-#define portstate(stmt)
-#endif
 
 static void am35x_musb_set_vbus(struct musb *musb, int is_on)
 {
@@ -314,7 +310,7 @@ static irqreturn_t am35x_musb_interrupt(int irq, void *hci)
 	}
 
 	if (musb->int_tx || musb->int_rx || musb->int_usb)
-		ret |= musb_interrupt(musb);
+		ret = IRQ_WAKE_THREAD;
 
 eoi:
 	/* EOI needs to be written for the IRQ to be re-asserted. */
