@@ -178,8 +178,9 @@ static int __devinit dwc3_event_buffers_setup(struct dwc3 *dwc)
 
 	for (n = 0; n < DWC3_EVENT_BUFFERS_NUM; n++) {
 		evt = dwc->ev_buffs[n];
-		dev_dbg(dwc->dev, "Event buf %p dma %u length %d\n",
-				evt->buf, evt->dma, evt->length);
+		dev_dbg(dwc->dev, "Event buf %p dma %llu length %d\n",
+				evt->buf, (unsigned long long) evt->dma,
+				evt->length);
 
 		dwc3_writel(dwc->regs, DWC3_GEVNTADRLO(n),
 				lower_32_bits(evt->dma));
