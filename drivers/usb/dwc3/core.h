@@ -153,6 +153,11 @@
 #define DWC3_GCTL_CLK_PIPEHALF	(2)
 #define DWC3_GCTL_CLK_MASK	(3)
 
+#define DWC3_GCTL_PRTCAPDIR(n)	(n << 12)
+#define DWC3_GCTL_PRTCAP_HOST	1
+#define DWC3_GCTL_PRTCAP_DEVICE	2
+#define DWC3_GCTL_PRTCAP_OTG	3
+
 #define DWC3_GCTL_DISSCRAMBLE	(1 << 3)
 
 /* Global USB2 PHY Configuration Register */
