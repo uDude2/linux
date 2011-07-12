@@ -230,22 +230,10 @@ static void dwc3_free_trb_pool(struct dwc3_ep *dep)
 	dep->trb_pool = NULL;
 }
 
-/**
- * __dwc3_gadget_ep_enable - Initializes a HW endpoint
- * @dep: endpoint to be initialized
- * @desc: USB Endpoint Descriptor
- *
- * Caller should take care of locking
- */
-static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
-		const struct usb_endpoint_descriptor *desc,
-		bool ignore_sequence_number)
+static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
 	struct dwc3_gadget_ep_cmd_params params;
-	struct dwc3		*dwc = dep->dwc;
-	u32			reg;
 	u32			cmd;
-	int			ret = -ENOMEM;
 
 	memset(&params, 0x00, sizeof(params));
 
@@ -255,16 +243,21 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		if (dep->number > 1)
 			cmd |= DWC3_DEPCMD_PARAM(2);
 
-		ret = dwc3_send_gadget_ep_cmd(dwc, 0, cmd, &params);
-		if (ret) {
-			dev_err(dwc->dev, "failed to start new configuration for %s\n",
-					dep->name);
-			goto err0;
-		}
+		return dwc3_send_gadget_ep_cmd(dwc, 0, cmd, &params);
 	}
 
+	return 0;
+}
+
+static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
+		const struct usb_endpoint_descriptor *desc, bool ignore)
+{
+	struct dwc3_gadget_ep_cmd_params params;
+
+	memset(&params, 0x00, sizeof(params));
+
 	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
-	params.param0.depcfg.ignore_sequence_number = ignore_sequence_number;
+	params.param0.depcfg.ignore_sequence_number = ignore;
 	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
 
 	params.param1.depcfg.xfer_complete_enable = true;
@@ -305,27 +298,60 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		dep->interval = 1 << (desc->bInterval - 1);
 	}
 
-	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+	return dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_SETEPCONFIG, &params);
-	if (ret) {
-		dev_err(dwc->dev, "failed to configure %s\n", dep->name);
-		goto err0;
-	}
+}
+
+static int dwc3_gadget_set_xfer_resource(struct dwc3 *dwc, struct dwc3_ep *dep)
+{
+	struct dwc3_gadget_ep_cmd_params params;
 
 	memset(&params, 0x00, sizeof(params));
+
 	params.param0.depxfercfg.number_xfer_resources = 1;
-	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
+
+	return dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_SETTRANSFRESOURCE, &params);
+}
+
+/**
+ * __dwc3_gadget_ep_enable - Initializes a HW endpoint
+ * @dep: endpoint to be initialized
+ * @desc: USB Endpoint Descriptor
+ *
+ * Caller should take care of locking
+ */
+static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
+		const struct usb_endpoint_descriptor *desc,
+		bool ignore)
+{
+	struct dwc3		*dwc = dep->dwc;
+	u32			reg;
+	int			ret = -ENOMEM;
+
+	if (!(dep->flags & DWC3_EP_ENABLED)) {
+		ret = dwc3_gadget_start_config(dwc, dep);
+		if (ret)
+			goto err0;
+	}
+
+	ret = dwc3_gadget_set_ep_config(dwc, dep, desc, ignore);
 	if (ret)
 		goto err0;
 
-	dep->desc = desc;
-	dep->type = usb_endpoint_type(desc);
-	dep->flags |= DWC3_EP_ENABLED;
+	if (!(dep->flags & DWC3_EP_ENABLED)) {
+		ret = dwc3_gadget_set_xfer_resource(dwc, dep);
+		if (ret)
+			goto err0;
 
-	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
-	reg |= DWC3_DALEPENA_EP(dep->number);
-	dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
+		dep->desc = desc;
+		dep->type = usb_endpoint_type(desc);
+		dep->flags |= DWC3_EP_ENABLED;
+
+		reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
+		reg |= DWC3_DALEPENA_EP(dep->number);
+		dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
+	}
 
 	return 0;
 
