@@ -1391,11 +1391,9 @@ static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
 	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
 
 	if (on)
-		reg &= ~(DWC3_GUSB3PIPECTL_SUSPHY |
-				DWC3_GUSB3PIPECTL_PHYSOFTRST);
+		reg &= ~DWC3_GUSB3PIPECTL_SUSPHY;
 	else
-		reg |= (DWC3_GUSB3PIPECTL_SUSPHY |
-				DWC3_GUSB3PIPECTL_PHYSOFTRST);
+		reg |= DWC3_GUSB3PIPECTL_SUSPHY;
 
 	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
 }
@@ -1407,11 +1405,9 @@ static void dwc3_gadget_usb2_phy_power(struct dwc3 *dwc, int on)
 	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
 
 	if (on)
-		reg &= ~(DWC3_GUSB2PHYCFG_SUSPHY |
-				DWC3_GUSB2PHYCFG_PHYSOFTRST);
+		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
 	else
-		reg |= (DWC3_GUSB2PHYCFG_SUSPHY |
-				DWC3_GUSB2PHYCFG_PHYSOFTRST);
+		reg |= DWC3_GUSB2PHYCFG_SUSPHY;
 
 	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 }
