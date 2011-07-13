@@ -1813,8 +1813,9 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	 * REVISIT: power down scale might be different
 	 * depending on PHY used, need to pass that via platform_data
 	 */
-	reg |= DWC3_GCTL_PWRDNSCALE(0x61a) | DWC3_GCTL_DISSCRAMBLE
+	reg |= DWC3_GCTL_PWRDNSCALE(0x61a)
 		| DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
+	reg &= ~DWC3_GCTL_DISSCRAMBLE;
 	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
