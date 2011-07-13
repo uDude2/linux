@@ -1819,6 +1819,16 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	reg |= DWC3_GCTL_PWRDNSCALE(0x61a)
 		| DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
 	reg &= ~DWC3_GCTL_DISSCRAMBLE;
+
+	/*
+	 * WORKAROUND: DWC3 revisions <1.90a have a bug
+	 * when The device fails to connect at SuperSpeed
+	 * and falls back to high-speed mode which causes
+	 * the device to enter in a Connect/Disconnect loop
+	 */
+	if (dwc->revision < DWC3_REVISION_190A)
+		reg |= DWC3_GCTL_U2RSTECN;
+
 	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
