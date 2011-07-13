@@ -147,6 +147,7 @@
 
 /* Global Configuration Register */
 #define DWC3_GCTL_PWRDNSCALE(n)	(n << 19)
+#define DWC3_GCTL_U2RSTECN	16
 #define DWC3_GCTL_RAMCLKSEL(x)	((x & DWC3_GCTL_CLK_MASK) << 6)
 #define DWC3_GCTL_CLK_BUS	(0)
 #define DWC3_GCTL_CLK_PIPE	(1)
@@ -541,6 +542,14 @@ struct dwc3 {
 	int			irq;
 
 	u32			revision;
+
+#define DWC3_REVISION_173A	0x5533173a
+#define DWC3_REVISION_175A	0x5533175a
+#define DWC3_REVISION_180A	0x5533180a
+#define DWC3_REVISION_183A	0x5533183a
+#define DWC3_REVISION_185A	0x5533185a
+#define DWC3_REVISION_188A	0x5533188a
+#define DWC3_REVISION_190A	0x5533190a
 
 	unsigned		is_selfpowered:1;
 	unsigned		three_stage_setup:1;
