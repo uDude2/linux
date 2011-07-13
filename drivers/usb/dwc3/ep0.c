@@ -477,6 +477,7 @@ static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 
 	switch (dwc->dev_state) {
 	case DWC3_DEFAULT_STATE:
+	case DWC3_ADDRESS_STATE:
 		/*
 		 * Not sure if we should program DevAddr now or later
 		 */
@@ -635,7 +636,7 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 		/* for some reason we did not get everything out */
 
 		dwc3_ep0_stall_and_restart(dwc);
-
+		dwc3_gadget_giveback(dep, r, -ECONNRESET);
 	} else {
 		/*
 		 * handle the case where we have to send a zero packet. This
