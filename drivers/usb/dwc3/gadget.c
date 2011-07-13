@@ -1386,56 +1386,6 @@ static void dwc3_clear_stall_all_ep(struct dwc3 *dwc)
 	}
 }
 
-static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
-{
-	dev_vdbg(dwc->dev, "%s\n", __func__);
-#if 0
-	XXX
-	U1/U2 is powersave optimization. Skip it for now. Anyway we need to
-	enable it before we can disable it.
-
-	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-	reg &= ~DWC3_DCTL_INITU1ENA;
-	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
-
-	reg &= ~DWC3_DCTL_INITU2ENA;
-	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
-#endif
-
-	dwc3_stop_active_transfers(dwc);
-	dwc3_disconnect_gadget(dwc);
-
-	dwc->gadget.speed = USB_SPEED_UNKNOWN;
-}
-
-static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
-{
-	u32			reg;
-
-	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
-
-	if (on)
-		reg &= ~DWC3_GUSB3PIPECTL_SUSPHY;
-	else
-		reg |= DWC3_GUSB3PIPECTL_SUSPHY;
-
-	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
-}
-
-static void dwc3_gadget_usb2_phy_power(struct dwc3 *dwc, int on)
-{
-	u32			reg;
-
-	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
-
-	if (on)
-		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
-	else
-		reg |= DWC3_GUSB2PHYCFG_SUSPHY;
-
-	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
-}
-
 static void dwc3_gadget_usb3_phy_reset(struct dwc3 *dwc)
 {
 	u32			reg;
@@ -1466,6 +1416,59 @@ static void dwc3_gadget_usb2_phy_reset(struct dwc3 *dwc)
 	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 
 	msleep(10);
+}
+
+static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
+{
+	dev_vdbg(dwc->dev, "%s\n", __func__);
+#if 0
+	XXX
+	U1/U2 is powersave optimization. Skip it for now. Anyway we need to
+	enable it before we can disable it.
+
+	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg &= ~DWC3_DCTL_INITU1ENA;
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+	reg &= ~DWC3_DCTL_INITU2ENA;
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+#endif
+
+	dwc3_stop_active_transfers(dwc);
+	dwc3_disconnect_gadget(dwc);
+
+	dwc->gadget.speed = USB_SPEED_UNKNOWN;
+
+	dwc3_gadget_usb2_phy_reset(dwc);
+	dwc3_gadget_usb3_phy_reset(dwc);
+}
+
+static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+
+	if (on)
+		reg &= ~DWC3_GUSB3PIPECTL_SUSPHY;
+	else
+		reg |= DWC3_GUSB3PIPECTL_SUSPHY;
+
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+}
+
+static void dwc3_gadget_usb2_phy_power(struct dwc3 *dwc, int on)
+{
+	u32			reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+
+	if (on)
+		reg &= ~DWC3_GUSB2PHYCFG_SUSPHY;
+	else
+		reg |= DWC3_GUSB2PHYCFG_SUSPHY;
+
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 }
 
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
