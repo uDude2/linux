@@ -250,14 +250,13 @@ static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
 }
 
 static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
-		const struct usb_endpoint_descriptor *desc, bool ignore)
+		const struct usb_endpoint_descriptor *desc)
 {
 	struct dwc3_gadget_ep_cmd_params params;
 
 	memset(&params, 0x00, sizeof(params));
 
 	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
-	params.param0.depcfg.ignore_sequence_number = ignore;
 	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
 
 	params.param1.depcfg.xfer_complete_enable = true;
@@ -322,8 +321,7 @@ static int dwc3_gadget_set_xfer_resource(struct dwc3 *dwc, struct dwc3_ep *dep)
  * Caller should take care of locking
  */
 static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
-		const struct usb_endpoint_descriptor *desc,
-		bool ignore)
+		const struct usb_endpoint_descriptor *desc)
 {
 	struct dwc3		*dwc = dep->dwc;
 	u32			reg;
@@ -335,7 +333,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 			goto err0;
 	}
 
-	ret = dwc3_gadget_set_ep_config(dwc, dep, desc, ignore);
+	ret = dwc3_gadget_set_ep_config(dwc, dep, desc);
 	if (ret)
 		goto err0;
 
@@ -453,7 +451,7 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 	dev_vdbg(dwc->dev, "Enabling %s\n", dep->name);
 
 	spin_lock_irqsave(&dwc->lock, flags);
-	ret = __dwc3_gadget_ep_enable(dep, desc, true);
+	ret = __dwc3_gadget_ep_enable(dep, desc);
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return ret;
@@ -1593,14 +1591,14 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	dwc3_gadget_disable_phy(dwc, dwc->gadget.speed);
 
 	dep = dwc->eps[0];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, true);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
 		return;
 	}
 
 	dep = dwc->eps[1];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, true);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
 		return;
@@ -1832,14 +1830,14 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dwc3_gadget_ep0_desc.wMaxPacketSize = 9;
 
 	dep = dwc->eps[0];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, false);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
 		goto err4;
 	}
 
 	dep = dwc->eps[1];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, false);
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
 	if (ret) {
 		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
 		goto err5;
