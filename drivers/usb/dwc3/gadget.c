@@ -1151,55 +1151,42 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	int			ret;
 	unsigned int		count;
 
-	req = next_request(&dep->req_queued);
-	if (!req) {
-		dev_err(dwc->dev, "no transfer to complete on %s ?\n",
-				dep->name);
-		return;
-	}
+	if (event->status & DEPEVT_STATUS_BUSERR)
+		status = -ECONNRESET;
+	do {
+		req = next_request(&dep->req_queued);
+		if (!req)
+			break;
 
-	dma_unmap_single(dwc->dev, req->trb_dma, sizeof(struct dwc3_trb),
-			DMA_BIDIRECTIONAL);
-	dwc3_trb_to_nat(req->trb, &trb);
+		dma_unmap_single(dwc->dev, req->trb_dma,
+				sizeof(struct dwc3_trb), DMA_BIDIRECTIONAL);
+		dwc3_trb_to_nat(req->trb, &trb);
 
-	if (trb.hwo) {
-		dev_err(dwc->dev, "%s's TRB (%p) still owned by HW\n",
-				dep->name, req->trb);
-		return;
-	}
-
-	count = trb.length;
-
-	if (dep->direction) {
-		if (count) {
-			dev_err(dwc->dev, "incomplete TX/IN transfer on %s\n",
-					dep->name);
-			status = -ECONNRESET;
+		if (trb.hwo) {
+			dev_err(dwc->dev, "%s's TRB (%p) still owned by HW\n",
+					dep->name, req->trb);
+			continue;
 		}
-	}
+		count = trb.length;
 
-	/*
-	 * We assume here we will always receive the entire data block
-	 * which we should receive. Meaning, if we program RX to receive
-	 * 4K but we receive only 2K, we assume that's all we should receive
-	 * and we simply bounce the request back to the gadget driver for
-	 * further processing.
-	 */
-	req->request.actual += req->request.length - count;
+		if (dep->direction) {
+			if (count) {
+				dev_err(dwc->dev, "incomplete IN transfer %s\n",
+						dep->name);
+				status = -ECONNRESET;
+			}
+		}
 
-	/*
-	 * Giveback the request. If we couldn't transfer everything,
-	 * giveback anyway but change status to -ECONNRESET
-	 */
-	dwc3_gadget_giveback(dep, req, status);
-
-	/*
-	 * The LST bit says that this is the last XterComplete event i.e. the
-	 * request with the TRB bit set. We wait for it before we enqueue new
-	 * requests
-	 */
-	if (!(event->status & DEPEVT_STATUS_LST))
-		goto out;
+		/*
+		 * We assume here we will always receive the entire data block
+		 * which we should receive. Meaning, if we program RX to
+		 * receive 4K but we receive only 2K, we assume that's all we
+		 * should receive and we simply bounce the request back to the
+		 * gadget driver for further processing.
+		 */
+		req->request.actual += req->request.length - count;
+		dwc3_gadget_giveback(dep, req, status);
+	} while (1);
 
 	dep->flags &= ~DWC3_EP_BUSY;
 
