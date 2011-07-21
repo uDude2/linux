@@ -1062,24 +1062,12 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 	return 0;
 }
 
-static struct dwc3	*the_dwc;
-
-static int dwc3_gadget_start(struct usb_gadget_driver *driver,
-		int (*bind)(struct usb_gadget *))
+static int dwc3_gadget_start(struct usb_gadget *g,
+		struct usb_gadget_driver *driver)
 {
-	struct dwc3		*dwc = the_dwc;
+	struct dwc3		*dwc = gadget_to_dwc(g);
 	unsigned long		flags;
-	int			ret;
-
-	if (!driver || !bind || !driver->setup) {
-		ret = -EINVAL;
-		goto err0;
-	}
-
-	if (!dwc) {
-		ret = -ENODEV;
-		goto err0;
-	}
+	int			ret = 0;
 
 	spin_lock_irqsave(&dwc->lock, flags);
 
@@ -1088,52 +1076,23 @@ static int dwc3_gadget_start(struct usb_gadget_driver *driver,
 				dwc->gadget.name,
 				dwc->gadget_driver->driver.name);
 		ret = -EBUSY;
-		goto err1;
+		goto out;
 	}
 
 	dwc->gadget_driver	= driver;
 	dwc->gadget.dev.driver	= &driver->driver;
-	driver->driver.bus	= NULL;
 
+out:
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
-	ret = bind(&dwc->gadget);
-	if (ret) {
-		dev_err(dwc->dev, "bind failed\n");
-		goto err2;
-	}
-
-	return 0;
-
-err2:
-	spin_lock_irqsave(&dwc->lock, flags);
-
-	dwc->gadget_driver	= NULL;
-	dwc->gadget.dev.driver	= NULL;
-
-err1:
-	spin_unlock_irqrestore(&dwc->lock, flags);
-
-err0:
 	return ret;
 }
 
-static int dwc3_gadget_stop(struct usb_gadget_driver *driver)
+static int dwc3_gadget_stop(struct usb_gadget *g,
+		struct usb_gadget_driver *driver)
 {
-	struct dwc3		*dwc = the_dwc;
+	struct dwc3		*dwc = gadget_to_dwc(g);
 	unsigned long		flags;
-
-	if (!driver || !driver->unbind)
-		return -EINVAL;
-
-	if (!dwc)
-		return -ENODEV;
-
-	if (dwc->gadget_driver != driver)
-		return -EINVAL;
-
-	driver->disconnect(&dwc->gadget);
-	driver->unbind(&dwc->gadget);
 
 	spin_lock_irqsave(&dwc->lock, flags);
 
@@ -1149,8 +1108,8 @@ static const struct usb_gadget_ops dwc3_gadget_ops = {
 	.wakeup			= dwc3_gadget_wakeup,
 	.set_selfpowered	= dwc3_gadget_set_selfpowered,
 	.pullup			= dwc3_gadget_pullup,
-	.start			= dwc3_gadget_start,
-	.stop			= dwc3_gadget_stop,
+	.udc_start		= dwc3_gadget_start,
+	.udc_stop		= dwc3_gadget_stop,
 };
 
 /* -------------------------------------------------------------------------- */
@@ -1861,8 +1820,6 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dwc->gadget.dev.release		= dwc3_gadget_release;
 	dwc->gadget.name		= "dwc3-gadget";
 
-	the_dwc				= dwc;
-
 	/*
 	 * REVISIT: Here we should clear all pending IRQs to be
 	 * sure we're starting from a well known location.
@@ -1977,7 +1934,6 @@ err4:
 	dwc3_gadget_free_endpoints(dwc);
 
 err3:
-	the_dwc = NULL;
 	dma_free_coherent(dwc->dev, sizeof(*dwc->setup_buf) * 2,
 			dwc->setup_buf, dwc->setup_buf_addr);
 
@@ -2018,6 +1974,4 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 			dwc->ctrl_req, dwc->ctrl_req_addr);
 
 	device_unregister(&dwc->gadget.dev);
-
-	the_dwc = NULL;
 }
