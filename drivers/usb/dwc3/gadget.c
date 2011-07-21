@@ -1380,12 +1380,12 @@ static void dwc3_gadget_usb3_phy_reset(struct dwc3 *dwc)
 	reg |= DWC3_GUSB3PIPECTL_PHYSOFTRST;
 	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
 
-	msleep(10);
+	mdelay(10);
 
 	reg &= ~DWC3_GUSB3PIPECTL_PHYSOFTRST;
 	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
 
-	msleep(10);
+	mdelay(10);
 }
 
 static void dwc3_gadget_usb2_phy_reset(struct dwc3 *dwc)
@@ -1396,12 +1396,12 @@ static void dwc3_gadget_usb2_phy_reset(struct dwc3 *dwc)
 	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
 	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 
-	msleep(10);
+	mdelay(10);
 
 	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
 	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
 
-	msleep(10);
+	mdelay(10);
 }
 
 static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
