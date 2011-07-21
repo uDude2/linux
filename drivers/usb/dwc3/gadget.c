@@ -1062,10 +1062,88 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 	return 0;
 }
 
-static int dwc3_gadget_start(struct usb_gadget_driver *driver,
-		int (*bind)(struct usb_gadget *));
-static int dwc3_gadget_stop(struct usb_gadget_driver *driver);
+static struct dwc3	*the_dwc;
 
+static int dwc3_gadget_start(struct usb_gadget_driver *driver,
+		int (*bind)(struct usb_gadget *))
+{
+	struct dwc3		*dwc = the_dwc;
+	unsigned long		flags;
+	int			ret;
+
+	if (!driver || !bind || !driver->setup) {
+		ret = -EINVAL;
+		goto err0;
+	}
+
+	if (!dwc) {
+		ret = -ENODEV;
+		goto err0;
+	}
+
+	spin_lock_irqsave(&dwc->lock, flags);
+
+	if (dwc->gadget_driver) {
+		dev_err(dwc->dev, "%s is already bound to %s\n",
+				dwc->gadget.name,
+				dwc->gadget_driver->driver.name);
+		ret = -EBUSY;
+		goto err1;
+	}
+
+	dwc->gadget_driver	= driver;
+	dwc->gadget.dev.driver	= &driver->driver;
+	driver->driver.bus	= NULL;
+
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	ret = bind(&dwc->gadget);
+	if (ret) {
+		dev_err(dwc->dev, "bind failed\n");
+		goto err2;
+	}
+
+	return 0;
+
+err2:
+	spin_lock_irqsave(&dwc->lock, flags);
+
+	dwc->gadget_driver	= NULL;
+	dwc->gadget.dev.driver	= NULL;
+
+err1:
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+err0:
+	return ret;
+}
+
+static int dwc3_gadget_stop(struct usb_gadget_driver *driver)
+{
+	struct dwc3		*dwc = the_dwc;
+	unsigned long		flags;
+
+	if (!driver || !driver->unbind)
+		return -EINVAL;
+
+	if (!dwc)
+		return -ENODEV;
+
+	if (dwc->gadget_driver != driver)
+		return -EINVAL;
+
+	driver->disconnect(&dwc->gadget);
+	driver->unbind(&dwc->gadget);
+
+	spin_lock_irqsave(&dwc->lock, flags);
+
+	dwc->gadget_driver	= NULL;
+	dwc->gadget.dev.driver	= NULL;
+
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return 0;
+}
 static const struct usb_gadget_ops dwc3_gadget_ops = {
 	.get_frame		= dwc3_gadget_get_frame,
 	.wakeup			= dwc3_gadget_wakeup,
@@ -1131,8 +1209,6 @@ static void dwc3_gadget_free_endpoints(struct dwc3 *dwc)
 		kfree(dep);
 	}
 }
-
-static struct dwc3	*the_dwc;
 
 static void dwc3_gadget_release(struct device *dev)
 {
@@ -1944,96 +2020,4 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 	device_unregister(&dwc->gadget.dev);
 
 	the_dwc = NULL;
-}
-
-/* -------------------------------------------------------------------------- */
-
-/**
- * usb_gadget_probe_driver - registers and probes the gadget driver.
- * @driver: the gadget driver to register and probe
- * @bind: the bind function
- */
-static int dwc3_gadget_start(struct usb_gadget_driver *driver,
-		int (*bind)(struct usb_gadget *))
-{
-	struct dwc3		*dwc = the_dwc;
-	unsigned long		flags;
-	int			ret;
-
-	if (!driver || !bind || !driver->setup) {
-		ret = -EINVAL;
-		goto err0;
-	}
-
-	if (!dwc) {
-		ret = -ENODEV;
-		goto err0;
-	}
-
-	spin_lock_irqsave(&dwc->lock, flags);
-
-	if (dwc->gadget_driver) {
-		dev_err(dwc->dev, "%s is already bound to %s\n",
-				dwc->gadget.name,
-				dwc->gadget_driver->driver.name);
-		ret = -EBUSY;
-		goto err1;
-	}
-
-	dwc->gadget_driver	= driver;
-	dwc->gadget.dev.driver	= &driver->driver;
-	driver->driver.bus	= NULL;
-
-	spin_unlock_irqrestore(&dwc->lock, flags);
-
-	ret = bind(&dwc->gadget);
-	if (ret) {
-		dev_err(dwc->dev, "bind failed\n");
-		goto err2;
-	}
-
-	return 0;
-
-err2:
-	spin_lock_irqsave(&dwc->lock, flags);
-
-	dwc->gadget_driver	= NULL;
-	dwc->gadget.dev.driver	= NULL;
-
-err1:
-	spin_unlock_irqrestore(&dwc->lock, flags);
-
-err0:
-	return ret;
-}
-
-/**
- * usb_gadget_unregister_driver - unregisters a gadget driver.
- * @driver: the gadget driver to unregister
- */
-static int dwc3_gadget_stop(struct usb_gadget_driver *driver)
-{
-	struct dwc3		*dwc = the_dwc;
-	unsigned long		flags;
-
-	if (!driver || !driver->unbind)
-		return -EINVAL;
-
-	if (!dwc)
-		return -ENODEV;
-
-	if (dwc->gadget_driver != driver)
-		return -EINVAL;
-
-	driver->disconnect(&dwc->gadget);
-	driver->unbind(&dwc->gadget);
-
-	spin_lock_irqsave(&dwc->lock, flags);
-
-	dwc->gadget_driver	= NULL;
-	dwc->gadget.dev.driver	= NULL;
-
-	spin_unlock_irqrestore(&dwc->lock, flags);
-
-	return 0;
 }
