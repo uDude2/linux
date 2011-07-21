@@ -1066,8 +1066,10 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 		struct usb_gadget_driver *driver)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
+	struct dwc3_ep		*dep;
 	unsigned long		flags;
 	int			ret = 0;
+	u32			reg;
 
 	spin_lock_irqsave(&dwc->lock, flags);
 
@@ -1076,13 +1078,67 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 				dwc->gadget.name,
 				dwc->gadget_driver->driver.name);
 		ret = -EBUSY;
-		goto out;
+		goto err0;
 	}
 
 	dwc->gadget_driver	= driver;
 	dwc->gadget.dev.driver	= &driver->driver;
 
-out:
+	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+
+	/*
+	 * REVISIT: power down scale might be different
+	 * depending on PHY used, need to pass that via platform_data
+	 */
+	reg |= DWC3_GCTL_PWRDNSCALE(0x61a)
+		| DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
+	reg &= ~DWC3_GCTL_DISSCRAMBLE;
+
+	/*
+	 * WORKAROUND: DWC3 revisions <1.90a have a bug
+	 * when The device fails to connect at SuperSpeed
+	 * and falls back to high-speed mode which causes
+	 * the device to enter in a Connect/Disconnect loop
+	 */
+	if (dwc->revision < DWC3_REVISION_190A)
+		reg |= DWC3_GCTL_U2RSTECN;
+
+	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+
+	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
+	reg &= ~(DWC3_DCFG_SPEED_MASK);
+	reg |= DWC3_DCFG_SUPERSPEED;
+	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
+
+	/* Start with SuperSpeed Default */
+	dwc3_gadget_ep0_desc.wMaxPacketSize = 9;
+
+	dep = dwc->eps[0];
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
+		goto err0;
+	}
+
+	dep = dwc->eps[1];
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
+		goto err1;
+	}
+
+	/* begin to receive SETUP packets */
+	dwc->ep0state = EP0_IDLE;
+	dwc3_ep0_out_start(dwc);
+
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return 0;
+
+err1:
+	__dwc3_gadget_ep_disable(dwc->eps[0]);
+
+err0:
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return ret;
@@ -1095,6 +1151,9 @@ static int dwc3_gadget_stop(struct usb_gadget *g,
 	unsigned long		flags;
 
 	spin_lock_irqsave(&dwc->lock, flags);
+
+	__dwc3_gadget_ep_disable(dwc->eps[0]);
+	__dwc3_gadget_ep_disable(dwc->eps[1]);
 
 	dwc->gadget_driver	= NULL;
 	dwc->gadget.dev.driver	= NULL;
@@ -1780,7 +1839,6 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
  */
 int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 {
-	struct dwc3_ep				*dep;
 	u32					reg;
 	int					ret;
 	int					irq;
@@ -1829,52 +1887,9 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dwc3_gadget_usb2_phy_reset(dwc);
 	dwc3_gadget_usb3_phy_reset(dwc);
 
-	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
-
-	/*
-	 * REVISIT: power down scale might be different
-	 * depending on PHY used, need to pass that via platform_data
-	 */
-	reg |= DWC3_GCTL_PWRDNSCALE(0x61a)
-		| DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
-	reg &= ~DWC3_GCTL_DISSCRAMBLE;
-
-	/*
-	 * WORKAROUND: DWC3 revisions <1.90a have a bug
-	 * when The device fails to connect at SuperSpeed
-	 * and falls back to high-speed mode which causes
-	 * the device to enter in a Connect/Disconnect loop
-	 */
-	if (dwc->revision < DWC3_REVISION_190A)
-		reg |= DWC3_GCTL_U2RSTECN;
-
-	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
-
-	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
-	reg &= ~(DWC3_DCFG_SPEED_MASK);
-	reg |= DWC3_DCFG_SUPERSPEED;
-	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
-
 	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)
 		goto err3;
-
-	/* Start with SuperSpeed Default */
-	dwc3_gadget_ep0_desc.wMaxPacketSize = 9;
-
-	dep = dwc->eps[0];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
-	if (ret) {
-		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err4;
-	}
-
-	dep = dwc->eps[1];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
-	if (ret) {
-		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err5;
-	}
 
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
@@ -1883,7 +1898,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	if (ret) {
 		dev_err(dwc->dev, "failed to request irq #%d --> %d\n",
 				irq, ret);
-		goto err6;
+		goto err4;
 	}
 
 	/* Enable all but Start and End of Frame IRQs */
@@ -1902,33 +1917,23 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	if (ret) {
 		dev_err(dwc->dev, "failed to register gadget device\n");
 		put_device(&dwc->gadget.dev);
-		goto err7;
+		goto err5;
 	}
-
-	/* begin to receive SETUP packets */
-	dwc->ep0state = EP0_IDLE;
-	dwc3_ep0_out_start(dwc);
-
-	dwc3_gadget_run_stop(dwc, true);
 
 	ret = usb_add_gadget_udc(dwc->dev, &dwc->gadget);
 	if (ret) {
 		dev_err(dwc->dev, "failed to register udc\n");
-		goto err8;
+		goto err6;
 	}
+
 	return 0;
 
-err8:
-	dwc3_gadget_run_stop(dwc, false);
-	device_unregister(&dwc->gadget.dev);
-err7:
-	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0);
-
 err6:
-	__dwc3_gadget_ep_disable(dwc->eps[1]);
+	device_unregister(&dwc->gadget.dev);
 
 err5:
-	__dwc3_gadget_ep_disable(dwc->eps[0]);
+	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0x00);
+	free_irq(irq, dwc);
 
 err4:
 	dwc3_gadget_free_endpoints(dwc);
@@ -1957,6 +1962,7 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 	usb_del_gadget_udc(&dwc->gadget);
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
+	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0x00);
 	free_irq(irq, dwc);
 
 	for (i = 0; i < ARRAY_SIZE(dwc->eps); i++)
