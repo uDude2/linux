@@ -147,11 +147,17 @@
 
 /* Global Configuration Register */
 #define DWC3_GCTL_PWRDNSCALE(n)	(n << 19)
+#define DWC3_GCTL_U2RSTECN	16
 #define DWC3_GCTL_RAMCLKSEL(x)	((x & DWC3_GCTL_CLK_MASK) << 6)
 #define DWC3_GCTL_CLK_BUS	(0)
 #define DWC3_GCTL_CLK_PIPE	(1)
 #define DWC3_GCTL_CLK_PIPEHALF	(2)
 #define DWC3_GCTL_CLK_MASK	(3)
+
+#define DWC3_GCTL_PRTCAPDIR(n)	(n << 12)
+#define DWC3_GCTL_PRTCAP_HOST	1
+#define DWC3_GCTL_PRTCAP_DEVICE	2
+#define DWC3_GCTL_PRTCAP_OTG	3
 
 #define DWC3_GCTL_DISSCRAMBLE	(1 << 3)
 
@@ -165,7 +171,7 @@
 
 /* Device Configuration Register */
 #define DWC3_DCFG_DEVADDR(addr)	((addr) << 3)
-#define DWC3_DCFG_DEVADDR_MASK	DWC3_DCFG_DEVADDR(((1 << 7) - 1))
+#define DWC3_DCFG_DEVADDR_MASK	DWC3_DCFG_DEVADDR(0x7f)
 
 #define DWC3_DCFG_SPEED_MASK	(7 << 0)
 #define DWC3_DCFG_SUPERSPEED	(4 << 0)
@@ -246,7 +252,7 @@
 /* Device Endpoint Command Register */
 #define DWC3_DEPCMD_PARAM_SHIFT		16
 #define DWC3_DEPCMD_PARAM(x)		(x << DWC3_DEPCMD_PARAM_SHIFT)
-#define DWC3_DEPCMD_GET_RSC_IDX(x)	((x >> DWC3_DEPCMD_PARAM_SHIFT) & 0x7)
+#define DWC3_DEPCMD_GET_RSC_IDX(x)	((x >> DWC3_DEPCMD_PARAM_SHIFT) & 0x7f)
 #define DWC3_DEPCMD_STATUS_MASK		(0x0f << 12)
 #define DWC3_DEPCMD_STATUS(x)		((x & DWC3_DEPCMD_STATUS_MASK) >> 12)
 #define DWC3_DEPCMD_HIPRI_FORCERM	(1 << 11)
@@ -537,6 +543,14 @@ struct dwc3 {
 
 	u32			revision;
 
+#define DWC3_REVISION_173A	0x5533173a
+#define DWC3_REVISION_175A	0x5533175a
+#define DWC3_REVISION_180A	0x5533180a
+#define DWC3_REVISION_183A	0x5533183a
+#define DWC3_REVISION_185A	0x5533185a
+#define DWC3_REVISION_188A	0x5533188a
+#define DWC3_REVISION_190A	0x5533190a
+
 	unsigned		is_selfpowered:1;
 	unsigned		three_stage_setup:1;
 	unsigned		ep0_status_pending:1;
@@ -606,6 +620,9 @@ struct dwc3_event_depevt {
 	u32	endpoint_event:4;
 	u32	reserved11_10:2;
 	u32	status:4;
+#define DEPEVT_STATUS_BUSERR    (1 << 0)
+#define DEPEVT_STATUS_SHORT     (1 << 1)
+#define DEPEVT_STATUS_IOC       (1 << 2)
 #define DEPEVT_STATUS_LST	(1 << 3)
 	u32	parameters:16;
 } __packed;

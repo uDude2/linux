@@ -584,12 +584,6 @@ Who:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
 
 ----------------------------
 
-What:	g_file_storage driver
-When:	3.8
-Why:	This driver has been superseded by g_mass_storage.
-Who:	Alan Stern <stern@rowland.harvard.edu>
-
-----------------------------
 What:	For VIDIOC_S_FREQUENCY the type field must match the device node's type.
 	If not, return -EINVAL.
 When:	3.2
@@ -609,5 +603,12 @@ Why:	Just opening a V4L device should not change the state of the hardware
 	switch to radio mode by calling VIDIOC_S_FREQUENCY. This is the second
 	and last step of the move to consistent handling of tv and radio tuners.
 Who:	Hans Verkuil <hans.verkuil@cisco.com>
+
+----------------------------
+
+What:	g_file_storage driver
+When:	3.8
+Why:	This driver has been superseded by g_mass_storage.
+Who:	Alan Stern <stern@rowland.harvard.edu>
 
 ----------------------------

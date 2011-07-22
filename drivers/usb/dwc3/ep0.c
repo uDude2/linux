@@ -477,26 +477,19 @@ static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 
 	switch (dwc->dev_state) {
 	case DWC3_DEFAULT_STATE:
+	case DWC3_ADDRESS_STATE:
 		/*
 		 * Not sure if we should program DevAddr now or later
 		 */
 		reg = dwc3_readl(dwc->regs, DWC3_DCFG);
-		reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DEVADDR_MASK));
-		reg |= addr;
+		reg &= ~(DWC3_DCFG_DEVADDR_MASK);
+		reg |= DWC3_DCFG_DEVADDR(addr);
 		dwc3_writel(dwc->regs, DWC3_DCFG, reg);
+
 		if (addr)
 			dwc->dev_state = DWC3_ADDRESS_STATE;
-		break;
-
-	case DWC3_ADDRESS_STATE:
-		if (!addr) {
+		else
 			dwc->dev_state = DWC3_DEFAULT_STATE;
-		} else {
-			reg = dwc3_readl(dwc->regs, DWC3_DCFG);
-			reg &= ~(DWC3_DCFG_DEVADDR(DWC3_DCFG_DEVADDR_MASK));
-			reg |= addr;
-			dwc3_writel(dwc->regs, DWC3_DCFG, reg);
-		}
 		break;
 
 	case DWC3_CONFIGURED_STATE:
@@ -643,7 +636,7 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 		/* for some reason we did not get everything out */
 
 		dwc3_ep0_stall_and_restart(dwc);
-
+		dwc3_gadget_giveback(dep, r, -ECONNRESET);
 	} else {
 		/*
 		 * handle the case where we have to send a zero packet. This

@@ -536,6 +536,8 @@ extern void musb_read_fifo(struct musb_hw_ep *ep, u16 len, u8 *dst);
 
 extern void musb_load_testpacket(struct musb *);
 
+extern irqreturn_t musb_interrupt(struct musb *);
+
 extern void musb_hnp_stop(struct musb *musb);
 
 static inline void musb_platform_set_vbus(struct musb *musb, int is_on)

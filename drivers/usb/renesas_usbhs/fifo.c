@@ -26,7 +26,16 @@
 #define usbhsf_fifo_is_busy(f)	((f)->pipe) /* see usbhs_pipe_select_fifo */
 
 /*
- *		packet info function
+ *		packet initialize
+ */
+void usbhs_pkt_init(struct usbhs_pkt *pkt)
+{
+	pkt->dma = DMA_ADDR_INVALID;
+	INIT_LIST_HEAD(&pkt->node);
+}
+
+/*
+ *		packet control function
  */
 static int usbhsf_null_handle(struct usbhs_pkt *pkt, int *is_done)
 {
@@ -42,12 +51,6 @@ static struct usbhs_pkt_handle usbhsf_null_handler = {
 	.prepare = usbhsf_null_handle,
 	.try_run = usbhsf_null_handle,
 };
-
-void usbhs_pkt_init(struct usbhs_pkt *pkt)
-{
-	pkt->dma = DMA_ADDR_INVALID;
-	INIT_LIST_HEAD(&pkt->node);
-}
 
 void usbhs_pkt_push(struct usbhs_pipe *pipe, struct usbhs_pkt *pkt,
 		    struct usbhs_pkt_handle *handler,
@@ -293,7 +296,7 @@ static int usbhsf_fifo_select(struct usbhs_pipe *pipe,
 }
 
 /*
- *		PIO fifo functions
+ *		PIO push handler
  */
 static int usbhsf_pio_try_push(struct usbhs_pkt *pkt, int *is_done)
 {
@@ -313,8 +316,11 @@ static int usbhsf_pio_try_push(struct usbhs_pkt *pkt, int *is_done)
 		return 0;
 
 	ret = usbhs_pipe_is_accessible(pipe);
-	if (ret < 0)
+	if (ret < 0) {
+		/* inaccessible pipe is not an error */
+		ret = 0;
 		goto usbhs_fifo_write_busy;
+	}
 
 	ret = usbhsf_fifo_barrier(priv, fifo);
 	if (ret < 0)
@@ -395,6 +401,9 @@ struct usbhs_pkt_handle usbhs_fifo_pio_push_handler = {
 	.try_run = usbhsf_pio_try_push,
 };
 
+/*
+ *		PIO pop handler
+ */
 static int usbhsf_prepare_pop(struct usbhs_pkt *pkt, int *is_done)
 {
 	struct usbhs_pipe *pipe = pkt->pipe;
@@ -497,7 +506,7 @@ struct usbhs_pkt_handle usbhs_fifo_pio_pop_handler = {
 };
 
 /*
- *		handler function
+ *		DCP ctrol statge handler
  */
 static int usbhsf_ctrl_stage_end(struct usbhs_pkt *pkt, int *is_done)
 {
@@ -614,6 +623,9 @@ static void usbhsf_dma_prepare_tasklet(unsigned long data)
 	dma_async_issue_pending(chan);
 }
 
+/*
+ *		DMA push handler
+ */
 static int usbhsf_dma_prepare_push(struct usbhs_pkt *pkt, int *is_done)
 {
 	struct usbhs_pipe *pipe = pkt->pipe;
@@ -631,6 +643,9 @@ static int usbhsf_dma_prepare_push(struct usbhs_pkt *pkt, int *is_done)
 		goto usbhsf_pio_prepare_push;
 
 	if (len % 4) /* 32bit alignment */
+		goto usbhsf_pio_prepare_push;
+
+	if (((u32)pkt->buf + pkt->actual) & 0x7) /* 8byte alignment */
 		goto usbhsf_pio_prepare_push;
 
 	/* get enable DMA fifo */
@@ -686,6 +701,9 @@ struct usbhs_pkt_handle usbhs_fifo_dma_push_handler = {
 	.dma_done	= usbhsf_dma_push_done,
 };
 
+/*
+ *		DMA pop handler
+ */
 static int usbhsf_dma_try_pop(struct usbhs_pkt *pkt, int *is_done)
 {
 	struct usbhs_pipe *pipe = pkt->pipe;
@@ -702,6 +720,9 @@ static int usbhsf_dma_try_pop(struct usbhs_pkt *pkt, int *is_done)
 	/* get enable DMA fifo */
 	fifo = usbhsf_get_dma_fifo(priv, pkt);
 	if (!fifo)
+		goto usbhsf_pio_prepare_pop;
+
+	if (((u32)pkt->buf + pkt->actual) & 0x7) /* 8byte alignment */
 		goto usbhsf_pio_prepare_pop;
 
 	ret = usbhsf_fifo_select(pipe, fifo, 0);

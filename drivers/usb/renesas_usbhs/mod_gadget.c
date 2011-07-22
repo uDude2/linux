@@ -44,6 +44,7 @@ struct usbhsg_uep {
 struct usbhsg_gpriv {
 	struct usb_gadget	 gadget;
 	struct usbhs_mod	 mod;
+	struct list_head	 link;
 
 	struct usbhsg_uep	*uep;
 	int			 uep_size;
@@ -113,8 +114,18 @@ struct usbhsg_recip_handle {
 #define usbhsg_status_clr(gp, b) (gp->status &= ~b)
 #define usbhsg_status_has(gp, b) (gp->status &   b)
 
+/* controller */
+LIST_HEAD(the_controller_link);
+
+#define usbhsg_for_each_controller(gpriv)\
+	list_for_each_entry(gpriv, &the_controller_link, link)
+#define usbhsg_controller_register(gpriv)\
+	list_add_tail(&(gpriv)->link, &the_controller_link)
+#define usbhsg_controller_unregister(gpriv)\
+	list_del_init(&(gpriv)->link)
+
 /*
- *		list push/pop
+ *		queue push/pop
  */
 static void usbhsg_queue_push(struct usbhsg_uep *uep,
 			      struct usbhsg_request *ureq)
@@ -160,6 +171,9 @@ static void usbhsg_queue_done(struct usbhs_pkt *pkt)
 	usbhsg_queue_pop(uep, ureq, 0);
 }
 
+/*
+ *		dma map/unmap
+ */
 static int usbhsg_dma_map(struct device *dev,
 			  struct usbhs_pkt *pkt,
 			  enum dma_data_direction dir)
@@ -473,6 +487,11 @@ static int usbhsg_ep_enable(struct usb_ep *ep,
 		uep->pipe		= pipe;
 		pipe->mod_private	= uep;
 
+		/*
+		 * usbhs_fifo_dma_push/pop_handler try to
+		 * use dmaengine if possible.
+		 * It will use pio handler if impossible.
+		 */
 		if (usb_endpoint_dir_in(desc))
 			uep->handler = &usbhs_fifo_dma_push_handler;
 		else
@@ -724,11 +743,10 @@ static int usbhsg_try_stop(struct usbhs_priv *priv, u32 status)
  *		linux usb function
  *
  */
-struct usbhsg_gpriv *the_controller;
 static int usbhsg_gadget_start(struct usb_gadget_driver *driver,
 			    int (*bind)(struct usb_gadget *))
 {
-	struct usbhsg_gpriv *gpriv = the_controller;
+	struct usbhsg_gpriv *gpriv;
 	struct usbhs_priv *priv;
 	struct device *dev;
 	int ret;
@@ -738,10 +756,17 @@ static int usbhsg_gadget_start(struct usb_gadget_driver *driver,
 	    !driver->setup	||
 	    driver->speed != USB_SPEED_HIGH)
 		return -EINVAL;
-	if (!gpriv)
-		return -ENODEV;
-	if (gpriv->driver)
-		return -EBUSY;
+
+	/*
+	 * find unused controller
+	 */
+	usbhsg_for_each_controller(gpriv) {
+		if (!gpriv->driver)
+			goto find_unused_controller;
+	}
+	return -ENODEV;
+
+find_unused_controller:
 
 	dev  = usbhsg_gpriv_to_dev(gpriv);
 	priv = usbhsg_gpriv_to_priv(gpriv);
@@ -778,17 +803,24 @@ add_fail:
 
 static int usbhsg_gadget_stop(struct usb_gadget_driver *driver)
 {
-	struct usbhsg_gpriv *gpriv = the_controller;
+	struct usbhsg_gpriv *gpriv;
 	struct usbhs_priv *priv;
-	struct device *dev = usbhsg_gpriv_to_dev(gpriv);
-
-	if (!gpriv)
-		return -ENODEV;
+	struct device *dev;
 
 	if (!driver		||
-	    !driver->unbind	||
-	    driver != gpriv->driver)
+	    !driver->unbind)
 		return -EINVAL;
+
+	/*
+	 * find controller
+	 */
+	usbhsg_for_each_controller(gpriv) {
+		if (gpriv->driver == driver)
+			goto find_matching_controller;
+	}
+	return -ENODEV;
+
+find_matching_controller:
 
 	dev  = usbhsg_gpriv_to_dev(gpriv);
 	priv = usbhsg_gpriv_to_priv(gpriv);
@@ -911,7 +943,7 @@ int __devinit usbhs_mod_gadget_probe(struct usbhs_priv *priv)
 		}
 	}
 
-	the_controller = gpriv;
+	usbhsg_controller_register(gpriv);
 
 	ret = usb_add_gadget_udc(dev, &gpriv->gadget);
 	if (ret)
@@ -935,6 +967,9 @@ void __devexit usbhs_mod_gadget_remove(struct usbhs_priv *priv)
 	struct usbhsg_gpriv *gpriv = usbhsg_priv_to_gpriv(priv);
 
 	usb_del_gadget_udc(&gpriv->gadget);
+
+	usbhsg_controller_unregister(gpriv);
+
 	kfree(gpriv->uep);
 	kfree(gpriv);
 }
