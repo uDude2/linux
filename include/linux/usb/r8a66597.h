@@ -31,6 +31,9 @@ struct r8a66597_platdata {
 	/* This callback can control port power instead of DVSTCTR register. */
 	void (*port_power)(int port, int power);
 
+	/* This parameter is for BUSWAIT */
+	u16		buswait;
+
 	/* set one = on chip controller, set zero = external controller */
 	unsigned	on_chip:1;
 
@@ -42,6 +45,9 @@ struct r8a66597_platdata {
 
 	/* set one = big endian, set zero = little endian */
 	unsigned	endian:1;
+
+	/* (external controller only) set one = WR0_N shorted to WR1_N */
+	unsigned	wr0_shorted_to_wr1:1;
 };
 
 /* Register definitions */
