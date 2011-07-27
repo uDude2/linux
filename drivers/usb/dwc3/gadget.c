@@ -1241,9 +1241,12 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	unsigned		status = 0;
 	int			ret;
 	unsigned int		count;
+	unsigned int		s_pkt = 0;
 
 	if (event->status & DEPEVT_STATUS_BUSERR)
 		status = -ECONNRESET;
+	if (event->status & DEPEVT_STATUS_SHORT)
+		s_pkt = 1;
 	do {
 		req = next_request(&dep->req_queued);
 		if (!req)
@@ -1277,8 +1280,14 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 		 */
 		req->request.actual += req->request.length - count;
 		dwc3_gadget_giveback(dep, req, status);
+		if (s_pkt)
+			break;
 	} while (1);
 
+	if (s_pkt) {
+		if (next_request(&dep->req_queued))
+			goto out;
+	}
 	dep->flags &= ~DWC3_EP_BUSY;
 
 	if (list_empty(&dep->request_list))
