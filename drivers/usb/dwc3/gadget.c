@@ -655,7 +655,12 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 		return -EBUSY;
 	dep->flags &= ~DWC3_EP_PENDING_REQUEST;
 
-	dwc3_prepare_trbs(dep, true);
+	/*
+	 * If we are getting here after a short-out-packet we don't enqueue any
+	 * new requests as we try to set the IOC bit only on the last request.
+	 */
+	if (list_empty(&dep->req_queued))
+		dwc3_prepare_trbs(dep, true);
 	req = next_request(&dep->req_queued);
 	if (!req) {
 		dep->flags |= DWC3_EP_PENDING_REQUEST;
