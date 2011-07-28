@@ -303,6 +303,18 @@ config USB_PXA_U2O
 	  PXA9xx Processor series include a high speed USB2.0 device
 	  controller, which support high speed and full speed USB peripheral.
 
+config USB_GADGET_DWC3
+	tristate "DesignWare USB3.0 (DRD) Controller"
+	depends on USB_DWC3
+	select USB_GADGET_DUALSPEED
+	select USB_GADGET_SUPERSPEED
+	help
+	  DesignWare USB3.0 controller is a SuperSpeed USB3.0 Controller
+	  which can be configured for peripheral-only, host-only, hub-only
+	  and Dual-Role operation. This Controller was first integrated into
+	  the OMAP5 series of processors. More information about the OMAP5
+	  version of this controller, refer to http://www.ti.com/omap5.
+
 #
 # Controllers available in both integrated and discrete versions
 #
@@ -310,7 +322,7 @@ config USB_PXA_U2O
 # musb builds in ../musb along with host support
 config USB_GADGET_MUSB_HDRC
 	tristate "Inventra HDRC USB Peripheral (TI, ADI, ...)"
-	depends on USB_MUSB_HDRC && (USB_MUSB_PERIPHERAL || USB_MUSB_OTG)
+	depends on USB_MUSB_HDRC
 	select USB_GADGET_DUALSPEED
 	help
 	  This OTG-capable silicon IP is used in dual designs including
@@ -523,6 +535,13 @@ config USB_GADGET_SUPERSPEED
 	bool
 	depends on USB_GADGET
 	depends on USB_GADGET_DUALSPEED
+
+config USB_GADGET_SUPERSPEED
+	bool
+	depends on USB_GADGET
+	help
+	  Means the gadget drivers should include extra descriptors
+	  and code to handle SuperSpeed Peripheral Controllers.
 
 #
 # USB Gadget Drivers
