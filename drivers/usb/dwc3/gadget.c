@@ -197,7 +197,7 @@ static int dwc3_alloc_trb_pool(struct dwc3_ep *dep,
 		return 0;
 
 	dep->trb_pool = kzalloc(sizeof(struct dwc3_trb) * DWC3_TRB_NUM,
-			GFP_KERNEL);
+			GFP_ATOMIC);
 	if (!dep->trb_pool) {
 		dev_err(dep->dwc->dev, "failed to allocate trb pool for %s\n",
 				dep->name);
