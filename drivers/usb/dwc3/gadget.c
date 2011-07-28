@@ -603,7 +603,6 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 			trb.csp = true;
 		} else {
 			trb.lst = last_one;
-			trb.isp_imi = true;
 		}
 
 		switch (usb_endpoint_type(dep->desc)) {
