@@ -1250,8 +1250,6 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 
 	if (event->status & DEPEVT_STATUS_BUSERR)
 		status = -ECONNRESET;
-	if (event->status & DEPEVT_STATUS_SHORT)
-		s_pkt = 1;
 	do {
 		req = next_request(&dep->req_queued);
 		if (!req)
@@ -1274,6 +1272,9 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 						dep->name);
 				status = -ECONNRESET;
 			}
+		} else {
+			if (count && (event->status & DEPEVT_STATUS_SHORT))
+				s_pkt = 1;
 		}
 
 		/*
@@ -1287,15 +1288,13 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 		dwc3_gadget_giveback(dep, req, status);
 		if (s_pkt)
 			break;
+		if ((event->status & DEPEVT_STATUS_LST) && trb.lst)
+			break;
 	} while (1);
 
-	if (s_pkt) {
-		if (next_request(&dep->req_queued))
-			goto out;
-	}
 	dep->flags &= ~DWC3_EP_BUSY;
 
-	if (list_empty(&dep->request_list))
+	if (list_empty(&dep->request_list) && list_empty(&dep->request_list))
 		goto out;
 
 	ret = __dwc3_gadget_kick_transfer(dep, 0);
