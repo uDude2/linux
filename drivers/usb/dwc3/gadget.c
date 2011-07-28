@@ -257,7 +257,8 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 	memset(&params, 0x00, sizeof(params));
 
 	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
-	params.param0.depcfg.max_packet_size = desc->wMaxPacketSize;
+	params.param0.depcfg.max_packet_size =
+		le16_to_cpu(desc->wMaxPacketSize);
 
 	params.param1.depcfg.xfer_complete_enable = true;
 	params.param1.depcfg.ep_direction = dep->direction;
@@ -421,16 +422,16 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 
 	switch (usb_endpoint_type(desc)) {
 	case USB_ENDPOINT_XFER_CONTROL:
-		strncat(dep->name, "-control", 8);
+		strncat(dep->name, "-control", sizeof(dep->name));
 		break;
 	case USB_ENDPOINT_XFER_ISOC:
-		strncat(dep->name, "-isoc", 5);
+		strncat(dep->name, "-isoc", sizeof(dep->name));
 		break;
 	case USB_ENDPOINT_XFER_BULK:
-		strncat(dep->name, "-bulk", 5);
+		strncat(dep->name, "-bulk", sizeof(dep->name));
 		break;
 	case USB_ENDPOINT_XFER_INT:
-		strncat(dep->name, "-int", 4);
+		strncat(dep->name, "-int", sizeof(dep->name));
 		break;
 	default:
 		dev_err(dwc->dev, "invalid endpoint transfer type\n");
@@ -603,7 +604,6 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 			trb.csp = true;
 		} else {
 			trb.lst = last_one;
-			trb.isp_imi = true;
 		}
 
 		switch (usb_endpoint_type(dep->desc)) {
@@ -881,9 +881,7 @@ static int dwc3_gadget_ep_set_wedge(struct usb_ep *ep)
 static struct usb_endpoint_descriptor dwc3_gadget_ep0_desc = {
 	.bLength	= USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
-	.bEndpointAddress = 0,
 	.bmAttributes	= USB_ENDPOINT_XFER_CONTROL,
-	.wMaxPacketSize	= 0,	/* Fixed up later */
 };
 
 static const struct usb_ep_ops dwc3_gadget_ep0_ops = {
@@ -1111,7 +1109,7 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
 	/* Start with SuperSpeed Default */
-	dwc3_gadget_ep0_desc.wMaxPacketSize = 9;
+	dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(9);
 
 	dep = dwc->eps[0];
 	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc);
@@ -1243,9 +1241,12 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	unsigned		status = 0;
 	int			ret;
 	unsigned int		count;
+	unsigned int		s_pkt = 0;
 
 	if (event->status & DEPEVT_STATUS_BUSERR)
 		status = -ECONNRESET;
+	if (event->status & DEPEVT_STATUS_SHORT)
+		s_pkt = 1;
 	do {
 		req = next_request(&dep->req_queued);
 		if (!req)
@@ -1279,8 +1280,14 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 		 */
 		req->request.actual += req->request.length - count;
 		dwc3_gadget_giveback(dep, req, status);
+		if (s_pkt)
+			break;
 	} while (1);
 
+	if (s_pkt) {
+		if (next_request(&dep->req_queued))
+			goto out;
+	}
 	dep->flags &= ~DWC3_EP_BUSY;
 
 	if (list_empty(&dep->request_list))
@@ -1564,6 +1571,10 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	if (dwc->gadget.speed != USB_SPEED_UNKNOWN)
 		dwc3_disconnect_gadget(dwc);
 
+	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg &= ~DWC3_DCTL_TSTCTRL_MASK;
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
 	dwc3_stop_active_transfers(dwc);
 	dwc3_clear_stall_all_ep(dwc);
 
@@ -1652,20 +1663,20 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	switch (speed) {
 	case DWC3_DCFG_SUPERSPEED:
-		dwc3_gadget_ep0_desc.wMaxPacketSize = 9;
+		dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
 		dwc->gadget.speed = USB_SPEED_SUPER;
 		break;
 	case DWC3_DCFG_HIGHSPEED:
-		dwc3_gadget_ep0_desc.wMaxPacketSize = 64;
+		dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(64);
 		dwc->gadget.speed = USB_SPEED_HIGH;
 		break;
 	case DWC3_DCFG_FULLSPEED2:
 	case DWC3_DCFG_FULLSPEED1:
-		dwc3_gadget_ep0_desc.wMaxPacketSize = 64;
+		dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(64);
 		dwc->gadget.speed = USB_SPEED_FULL;
 		break;
 	case DWC3_DCFG_LOWSPEED:
-		dwc3_gadget_ep0_desc.wMaxPacketSize = 8;
+		dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(8);
 		dwc->gadget.speed = USB_SPEED_LOW;
 		break;
 	}
