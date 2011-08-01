@@ -197,7 +197,7 @@ static int dwc3_alloc_trb_pool(struct dwc3_ep *dep,
 		return 0;
 
 	dep->trb_pool = kzalloc(sizeof(struct dwc3_trb) * DWC3_TRB_NUM,
-			GFP_KERNEL);
+			GFP_ATOMIC);
 	if (!dep->trb_pool) {
 		dev_err(dep->dwc->dev, "failed to allocate trb pool for %s\n",
 				dep->name);
@@ -655,7 +655,12 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 		return -EBUSY;
 	dep->flags &= ~DWC3_EP_PENDING_REQUEST;
 
-	dwc3_prepare_trbs(dep, true);
+	/*
+	 * If we are getting here after a short-out-packet we don't enqueue any
+	 * new requests as we try to set the IOC bit only on the last request.
+	 */
+	if (list_empty(&dep->req_queued))
+		dwc3_prepare_trbs(dep, true);
 	req = next_request(&dep->req_queued);
 	if (!req) {
 		dep->flags |= DWC3_EP_PENDING_REQUEST;
@@ -1245,8 +1250,6 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 
 	if (event->status & DEPEVT_STATUS_BUSERR)
 		status = -ECONNRESET;
-	if (event->status & DEPEVT_STATUS_SHORT)
-		s_pkt = 1;
 	do {
 		req = next_request(&dep->req_queued);
 		if (!req)
@@ -1269,6 +1272,9 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 						dep->name);
 				status = -ECONNRESET;
 			}
+		} else {
+			if (count && (event->status & DEPEVT_STATUS_SHORT))
+				s_pkt = 1;
 		}
 
 		/*
@@ -1282,15 +1288,13 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 		dwc3_gadget_giveback(dep, req, status);
 		if (s_pkt)
 			break;
+		if ((event->status & DEPEVT_STATUS_LST) && trb.lst)
+			break;
 	} while (1);
 
-	if (s_pkt) {
-		if (next_request(&dep->req_queued))
-			goto out;
-	}
 	dep->flags &= ~DWC3_EP_BUSY;
 
-	if (list_empty(&dep->request_list))
+	if (list_empty(&dep->request_list) && list_empty(&dep->request_list))
 		goto out;
 
 	ret = __dwc3_gadget_kick_transfer(dep, 0);
