@@ -393,6 +393,7 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 	u32			mode;
 
 	wValue = le16_to_cpu(ctrl->wValue);
+	wIndex = le16_to_cpu(ctrl->wIndex);
 	recip = ctrl->bRequestType & USB_RECIP_MASK;
 	switch (recip) {
 	case USB_RECIP_DEVICE:
@@ -453,7 +454,6 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 	case USB_RECIP_INTERFACE:
 		switch (wValue) {
 		case USB_INTRF_FUNC_SUSPEND:
-			wIndex = le16_to_cpu(ctrl->wIndex);
 			if (wIndex & USB_INTRF_FUNC_SUSPEND_LP)
 				/* XXX enable Low power suspend */
 				;
