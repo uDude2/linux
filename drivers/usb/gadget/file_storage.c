@@ -589,10 +589,15 @@ static int populate_config_buf(struct usb_gadget *gadget,
 		return -EINVAL;
 
 	if (gadget_is_dualspeed(gadget) && type == USB_DT_OTHER_SPEED_CONFIG)
-		speed = (USB_SPEED_FULL + USB_SPEED_HIGH) - speed;
-	function = gadget_is_dualspeed(gadget) && speed == USB_SPEED_HIGH
-		? (const struct usb_descriptor_header **)fsg_hs_function
-		: (const struct usb_descriptor_header **)fsg_fs_function;
+		speed = (USB_SPEED_FULL + USB_SPEED_HIGH +
+				USB_SPEED_SUPER) - speed;
+
+	if (gadget_is_superspeed(gadget) && speed == USB_SPEED_SUPER)
+		function = (const struct usb_descriptor_header **) fsg_ss_function;
+	else if (gadget_is_dualspeed(gadget) && speed == USB_SPEED_HIGH)
+		function = (const struct usb_descriptor_header **) fsg_hs_function;
+	else
+		function = (const struct usb_descriptor_header **)fsg_fs_function;
 
 	/* for now, don't advertise srp-only devices */
 	if (!gadget_is_otg(gadget))
@@ -2776,13 +2781,15 @@ reset:
 
 	/* Enable the endpoints */
 	d = fsg_ep_desc(fsg->gadget,
-			&fsg_fs_bulk_in_desc, &fsg_hs_bulk_in_desc);
+			&fsg_fs_bulk_in_desc, &fsg_hs_bulk_in_desc,
+			&fsg_ss_bulk_in_desc);
 	if ((rc = enable_endpoint(fsg, fsg->bulk_in, d)) != 0)
 		goto reset;
 	fsg->bulk_in_enabled = 1;
 
 	d = fsg_ep_desc(fsg->gadget,
-			&fsg_fs_bulk_out_desc, &fsg_hs_bulk_out_desc);
+			&fsg_fs_bulk_out_desc, &fsg_hs_bulk_out_desc,
+			&fsg_ss_bulk_out_desc);
 	if ((rc = enable_endpoint(fsg, fsg->bulk_out, d)) != 0)
 		goto reset;
 	fsg->bulk_out_enabled = 1;
@@ -2791,7 +2798,8 @@ reset:
 
 	if (transport_is_cbi()) {
 		d = fsg_ep_desc(fsg->gadget,
-				&fsg_fs_intr_in_desc, &fsg_hs_intr_in_desc);
+				&fsg_fs_intr_in_desc, &fsg_hs_intr_in_desc,
+				&fsg_ss_intr_in_desc);
 		if ((rc = enable_endpoint(fsg, fsg->intr_in, d)) != 0)
 			goto reset;
 		fsg->intr_in_enabled = 1;
@@ -2854,6 +2862,7 @@ static int do_set_config(struct fsg_dev *fsg, u8 new_config)
 			case USB_SPEED_LOW:	speed = "low";	break;
 			case USB_SPEED_FULL:	speed = "full";	break;
 			case USB_SPEED_HIGH:	speed = "high";	break;
+			case USB_SPEED_SUPER:	speed = "super"; break;
 			default: 		speed = "?";	break;
 			}
 			INFO(fsg, "%s speed config #%d\n", speed, fsg->config);
@@ -3430,6 +3439,24 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 			fsg_fs_intr_in_desc.bEndpointAddress;
 	}
 
+	if (gadget_is_superspeed(gadget)) {
+		unsigned		max_burst;
+
+		fsg_ss_function[i + FSG_SS_FUNCTION_PRE_EP_ENTRIES] = NULL;
+
+		/* Calculate bMaxBurst, we know packet size is 1024 */
+		max_burst = min_t(unsigned, mod_data.buflen / 1024, 15);
+
+		/* Assume endpoint addresses are the same for both speeds */
+		fsg_ss_bulk_in_desc.bEndpointAddress =
+			fsg_fs_bulk_in_desc.bEndpointAddress;
+		fsg_ss_bulk_in_comp_desc.bMaxBurst = max_burst;
+
+		fsg_ss_bulk_out_desc.bEndpointAddress =
+			fsg_fs_bulk_out_desc.bEndpointAddress;
+		fsg_ss_bulk_out_comp_desc.bMaxBurst = max_burst;
+	}
+
 	if (gadget_is_otg(gadget))
 		fsg_otg_desc.bmAttributes |= USB_OTG_HNP;
 
@@ -3546,11 +3573,7 @@ static void fsg_resume(struct usb_gadget *gadget)
 /*-------------------------------------------------------------------------*/
 
 static struct usb_gadget_driver		fsg_driver = {
-#ifdef CONFIG_USB_GADGET_DUALSPEED
-	.speed		= USB_SPEED_HIGH,
-#else
-	.speed		= USB_SPEED_FULL,
-#endif
+	.speed		= USB_SPEED_SUPER,
 	.function	= (char *) fsg_string_product,
 	.unbind		= fsg_unbind,
 	.disconnect	= fsg_disconnect,
