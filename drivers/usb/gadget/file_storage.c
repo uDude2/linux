@@ -2791,13 +2791,15 @@ reset:
 
 	/* Enable the endpoints */
 	d = fsg_ep_desc(fsg->gadget,
-			&fsg_fs_bulk_in_desc, &fsg_hs_bulk_in_desc);
+			&fsg_fs_bulk_in_desc, &fsg_hs_bulk_in_desc,
+			&fsg_ss_bulk_in_desc);
 	if ((rc = enable_endpoint(fsg, fsg->bulk_in, d)) != 0)
 		goto reset;
 	fsg->bulk_in_enabled = 1;
 
 	d = fsg_ep_desc(fsg->gadget,
-			&fsg_fs_bulk_out_desc, &fsg_hs_bulk_out_desc);
+			&fsg_fs_bulk_out_desc, &fsg_hs_bulk_out_desc,
+			&fsg_ss_bulk_out_desc);
 	if ((rc = enable_endpoint(fsg, fsg->bulk_out, d)) != 0)
 		goto reset;
 	fsg->bulk_out_enabled = 1;
@@ -2806,7 +2808,8 @@ reset:
 
 	if (transport_is_cbi()) {
 		d = fsg_ep_desc(fsg->gadget,
-				&fsg_fs_intr_in_desc, &fsg_hs_intr_in_desc);
+				&fsg_fs_intr_in_desc, &fsg_hs_intr_in_desc,
+				&fsg_ss_intr_in_desc);
 		if ((rc = enable_endpoint(fsg, fsg->intr_in, d)) != 0)
 			goto reset;
 		fsg->intr_in_enabled = 1;
@@ -3443,6 +3446,26 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 			fsg_fs_bulk_out_desc.bEndpointAddress;
 		fsg_hs_intr_in_desc.bEndpointAddress =
 			fsg_fs_intr_in_desc.bEndpointAddress;
+	}
+
+	if (gadget_is_superspeed(gadget)) {
+		u8			max_burst;
+
+		fsg_ss_function[i + FSG_SS_FUNCTION_PRE_EP_ENTRIES] = NULL;
+
+		/* Calculate bMaxBurst, we know packet size is 1024 */
+		max_burst = (mod_data.buflen << (FSG_NUM_BUFFERS - 1) >>
+				(__ffs(1024)));
+		max_burst = min_t(u8,max_burst, 15);
+
+		/* Assume endpoint addresses are the same for both speeds */
+		fsg_ss_bulk_in_desc.bEndpointAddress =
+			fsg_fs_bulk_in_desc.bEndpointAddress;
+		fsg_ss_bulk_in_comp_desc.bMaxBurst = max_burst;
+
+		fsg_ss_bulk_out_desc.bEndpointAddress =
+			fsg_fs_bulk_out_desc.bEndpointAddress;
+		fsg_ss_bulk_out_comp_desc.bMaxBurst = max_burst;
 	}
 
 	if (gadget_is_otg(gadget))
