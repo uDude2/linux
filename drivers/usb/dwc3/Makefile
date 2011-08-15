@@ -9,7 +9,7 @@ ifneq ($(CONFIG_USB_GADGET_DWC3),)
 	dwc3-y				+= gadget.o ep0.o
 endif
 
-ifneq ($(CONFIG_ARCH_OMAP5),)
+ifneq ($(CONFIG_ARCH_OMAP),)
 	obj-$(CONFIG_USB_DWC3)		+= dwc3-omap.o
 endif
 
