@@ -1715,6 +1715,8 @@ static int musb_gadget_pullup(struct usb_gadget *gadget, int is_on)
 
 	is_on = !!is_on;
 
+	pm_runtime_get_sync(musb->controller);
+
 	/* NOTE: this assumes we are sensing vbus; we'd rather
 	 * not pullup unless the B-session is active.
 	 */
@@ -1724,6 +1726,9 @@ static int musb_gadget_pullup(struct usb_gadget *gadget, int is_on)
 		musb_pullup(musb, is_on);
 	}
 	spin_unlock_irqrestore(&musb->lock, flags);
+
+	pm_runtime_put(musb->controller);
+
 	return 0;
 }
 
@@ -1868,6 +1873,7 @@ int __init musb_gadget_setup(struct musb *musb)
 
 	return 0;
 err:
+	musb->g.dev.parent = NULL;
 	device_unregister(&musb->g.dev);
 	return status;
 }
@@ -1875,7 +1881,8 @@ err:
 void musb_gadget_cleanup(struct musb *musb)
 {
 	usb_del_gadget_udc(&musb->g);
-	device_unregister(&musb->g.dev);
+	if (musb->g.dev.parent)
+		device_unregister(&musb->g.dev);
 }
 
 /*
