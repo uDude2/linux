@@ -183,13 +183,8 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	} while (1);
 }
 
-static int dwc3_alloc_trb_pool(struct dwc3_ep *dep,
-		const struct usb_endpoint_descriptor *desc)
+static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
 {
-	struct dwc3_trb_hw	*trb_st_hw;
-	struct dwc3_trb_hw	*trb_link_hw;
-	struct dwc3_trb		trb_link;
-
 	if (dep->trb_pool)
 		return 0;
 
@@ -204,23 +199,6 @@ static int dwc3_alloc_trb_pool(struct dwc3_ep *dep,
 		return -ENOMEM;
 	}
 
-	if (!usb_endpoint_xfer_isoc(desc))
-		return 0;
-
-	memset(&trb_link, 0, sizeof(trb_link));
-
-	/* Link TRB for ISOC. The HWO but is never reset */
-	trb_st_hw = &dep->trb_pool[0];
-
-	trb_link.bplh = virt_to_phys(trb_st_hw);
-	trb_link.trbctl = DWC3_TRBCTL_LINK_TRB;
-	trb_link.hwo = true;
-
-	trb_link_hw = &dep->trb_pool[DWC3_TRB_NUM - 1];
-	dwc3_trb_to_hw(&trb_link, trb_link_hw);
-
-	dma_sync_single_for_device(dep->dwc->dev, virt_to_phys(trb_link_hw),
-			sizeof(trb_link_hw), DMA_TO_DEVICE);
 	return 0;
 }
 
@@ -319,17 +297,21 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
 		ret = dwc3_gadget_start_config(dwc, dep);
 		if (ret)
-			goto err0;
+			return ret;
 	}
 
 	ret = dwc3_gadget_set_ep_config(dwc, dep, desc);
 	if (ret)
-		goto err0;
+		return ret;
 
 	if (!(dep->flags & DWC3_EP_ENABLED)) {
+		struct dwc3_trb_hw	*trb_st_hw;
+		struct dwc3_trb_hw	*trb_link_hw;
+		struct dwc3_trb		trb_link;
+
 		ret = dwc3_gadget_set_xfer_resource(dwc, dep);
 		if (ret)
-			goto err0;
+			return ret;
 
 		dep->desc = desc;
 		dep->type = usb_endpoint_type(desc);
@@ -338,14 +320,27 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 		reg |= DWC3_DALEPENA_EP(dep->number);
 		dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
+
+		if (!usb_endpoint_xfer_isoc(desc))
+			return 0;
+
+		memset(&trb_link, 0, sizeof(trb_link));
+
+		/* Link TRB for ISOC. The HWO but is never reset */
+		trb_st_hw = &dep->trb_pool[0];
+
+		trb_link.bplh = virt_to_phys(trb_st_hw);
+		trb_link.trbctl = DWC3_TRBCTL_LINK_TRB;
+		trb_link.hwo = true;
+
+		trb_link_hw = &dep->trb_pool[DWC3_TRB_NUM - 1];
+		dwc3_trb_to_hw(&trb_link, trb_link_hw);
+
+		dma_sync_single_for_device(dep->dwc->dev, virt_to_phys(trb_link_hw),
+				sizeof(trb_link_hw), DMA_TO_DEVICE);
 	}
 
 	return 0;
-
-err0:
-	dwc3_free_trb_pool(dep);
-
-	return ret;
 }
 
 /**
@@ -366,8 +361,6 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 	dep->desc = NULL;
 	dep->type = 0;
 	dep->flags &= ~DWC3_EP_ENABLED;
-
-	dwc3_free_trb_pool(dep);
 
 	return 0;
 }
@@ -429,12 +422,6 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 		dev_WARN_ONCE(dwc->dev, true, "%s is already enabled\n",
 				dep->name);
 		return 0;
-	}
-
-	ret = dwc3_alloc_trb_pool(dep, desc);
-	if (ret) {
-		dev_err(dwc->dev, "failed to allocate TRB pool\n");
-		return ret;
 	}
 
 	dev_vdbg(dwc->dev, "Enabling %s\n", dep->name);
@@ -1195,10 +1182,18 @@ static int __devinit dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 			if (!epnum)
 				dwc->gadget.ep0 = &dep->endpoint;
 		} else {
+			int		ret;
+
 			dep->endpoint.maxpacket = 1024;
 			dep->endpoint.ops = &dwc3_gadget_ep_ops;
 			list_add_tail(&dep->endpoint.ep_list,
 					&dwc->gadget.ep_list);
+
+			ret = dwc3_alloc_trb_pool(dep);
+			if (ret) {
+				dev_err(dwc->dev, "%s: failed to allocate TRB pool\n", dep->name);
+				return ret;
+			}
 		}
 		INIT_LIST_HEAD(&dep->request_list);
 		INIT_LIST_HEAD(&dep->req_queued);
@@ -1214,8 +1209,11 @@ static void dwc3_gadget_free_endpoints(struct dwc3 *dwc)
 
 	for (epnum = 0; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
 		dep = dwc->eps[epnum];
+		dwc3_free_trb_pool(dep);
+
 		if (epnum != 0 && epnum != 1)
 			list_del(&dep->endpoint.ep_list);
+
 		kfree(dep);
 	}
 }
