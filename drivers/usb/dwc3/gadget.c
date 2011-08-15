@@ -1233,7 +1233,6 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	struct dwc3_request	*req;
 	struct dwc3_trb         trb;
 	unsigned		status = 0;
-	int			ret;
 	unsigned int		count;
 	unsigned int		s_pkt = 0;
 
