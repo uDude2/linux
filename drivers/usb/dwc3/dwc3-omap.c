@@ -44,6 +44,7 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/ioport.h>
+#include <linux/io.h>
 
 #include <asm/sizes.h>
 
@@ -130,8 +131,7 @@ static int dwc3_omap_runtime_suspend(struct device *dev)
 {
 	struct dwc3_omap	*omap = dev_get_drvdata(dev);
 
-	/* REVISIT save context */
-	memcpy(omap->context, omap->base, SZ_4K);
+	memcpy_fromio(omap->context, omap->base, SZ_4K);
 
 	return 0;
 }
@@ -140,8 +140,7 @@ static int dwc3_omap_runtime_resume(struct device *dev)
 {
 	struct dwc3_omap	*omap = dev_get_drvdata(dev);
 
-	/* REVISIT restore context */
-	memcpy(omap->base, omap->context, SZ_4K);
+	memcpy_toio(omap->base, omap->context, SZ_4K);
 
 	return 0;
 }
