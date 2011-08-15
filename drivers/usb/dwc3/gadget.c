@@ -21,8 +21,8 @@
  *    specific prior written permission.
  *
  * ALTERNATIVELY, this software may be distributed under the terms of the
- * GNU General Public License ("GPL") as published by the Free Software
- * Foundation, either version 2 of that License.
+ * GNU General Public License ("GPL") version 2, as published by the Free
+ * Software Foundation.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
  * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
@@ -261,30 +261,18 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 		le16_to_cpu(desc->wMaxPacketSize);
 
 	params.param1.depcfg.xfer_complete_enable = true;
-	params.param1.depcfg.ep_direction = dep->direction;
 	params.param1.depcfg.xfer_not_ready_enable = true;
 
 	if (usb_endpoint_xfer_isoc(desc))
 		params.param1.depcfg.xfer_in_progress_enable = true;
 
-	if (dep->number == 0 || dep->number == 1) {
-		/*
-		 * Physical Endpoints 0 and 1 *MUST* be mapped
-		 * to Logical Endpoint 0. Do not change this or
-		 * the driver has no way to work.
-		 */
-		params.param1.depcfg.ep_number = 0;
-	} else {
-		/*
-		 * We are doing 1:1 mapping for other endpoints, meaning
-		 * Physical Endpoints 2 maps to Logical Endpoint 2 and
-		 * so on.
-		 *
-		 * We did this on purpose so that don't need to have trickery
-		 * mapping logical endpoints to physical endpoints and so on.
-		 */
-		params.param1.depcfg.ep_number = dep->number;
-	}
+	/*
+	 * We are doing 1:1 mapping for endpoints, meaning
+	 * Physical Endpoints 2 maps to Logical Endpoint 2 and
+	 * so on. We consider the direction bit as part of the physical
+	 * endpoint number. So USB endpoint 0x81 is 0x03.
+	 */
+	params.param1.depcfg.ep_number = dep->number;
 
 	/*
 	 * We must use the lower 16 TX FIFOs even though
@@ -479,8 +467,9 @@ static int dwc3_gadget_ep_disable(struct usb_ep *ep)
 		return 0;
 	}
 
-	snprintf(dep->name, sizeof(dep->name), "ep%d%s", dep->number,
-				(dep->number & 1) ? "in" : "out");
+	snprintf(dep->name, sizeof(dep->name), "ep%d%s",
+			dep->number >> 1,
+			(dep->number & 1) ? "in" : "out");
 
 	spin_lock_irqsave(&dwc->lock, flags);
 	ret = __dwc3_gadget_ep_disable(dep);
@@ -1195,7 +1184,7 @@ static int __devinit dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 		dep->number = epnum;
 		dwc->eps[epnum] = dep;
 
-		snprintf(dep->name, sizeof(dep->name), "ep%d%s", epnum,
+		snprintf(dep->name, sizeof(dep->name), "ep%d%s", epnum >> 1,
 				(epnum & 1) ? "in" : "out");
 		dep->endpoint.name = dep->name;
 		dep->direction = (epnum & 1);
@@ -1293,23 +1282,6 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	} while (1);
 
 	dep->flags &= ~DWC3_EP_BUSY;
-
-	if (list_empty(&dep->request_list) && list_empty(&dep->request_list))
-		goto out;
-
-	ret = __dwc3_gadget_kick_transfer(dep, 0);
-	if (ret) {
-		dev_err(dwc->dev, "%s failed to start next request\n",
-				dep->name);
-		/*
-		 * FIXME on error, we should be giving back all broken
-		 * requests so gadget driver can re-start them or take
-		 * any other action
-		 */
-	}
-
-out:
-	return;
 }
 
 static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
