@@ -315,6 +315,7 @@ struct dwc3_event_buffer {
  * @request_list: list of requests for this endpoint
  * @req_queued: list of requests on this ep which have TRBs setup
  * @trb_pool: array of transaction buffers
+ * @trb_pool_dma: dma address of @trb_pool
  * @free_slot: next slot which is going to be used
  * @busy_slot: first slot which is owned by HW
  * @desc: usb_endpoint_descriptor pointer
@@ -333,7 +334,8 @@ struct dwc3_ep {
 	struct list_head	request_list;
 	struct list_head	req_queued;
 
-	struct dwc3_trb_hw		*trb_pool;
+	struct dwc3_trb_hw	*trb_pool;
+	dma_addr_t		trb_pool_dma;
 	u32			free_slot;
 	u32			busy_slot;
 	const struct usb_endpoint_descriptor *desc;

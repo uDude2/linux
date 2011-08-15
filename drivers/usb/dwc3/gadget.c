@@ -183,16 +183,27 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	} while (1);
 }
 
+static dma_addr_t dwc3_trb_dma_offset(struct dwc3_ep *dep,
+		struct dwc3_trb_hw *trb)
+{
+	u32		offset = trb - dep->trb_pool;
+
+	return dep->trb_pool_dma + offset;
+}
+
 static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
 {
+	struct dwc3		*dwc = dep->dwc;
+
 	if (dep->trb_pool)
 		return 0;
 
 	if (dep->number == 0 || dep->number == 1)
 		return 0;
 
-	dep->trb_pool = kzalloc(sizeof(struct dwc3_trb) * DWC3_TRB_NUM,
-			GFP_ATOMIC);
+	dep->trb_pool = dma_alloc_coherent(dwc->dev,
+			sizeof(struct dwc3_trb) * DWC3_TRB_NUM,
+			&dep->trb_pool_dma, GFP_KERNEL);
 	if (!dep->trb_pool) {
 		dev_err(dep->dwc->dev, "failed to allocate trb pool for %s\n",
 				dep->name);
@@ -204,8 +215,13 @@ static int dwc3_alloc_trb_pool(struct dwc3_ep *dep)
 
 static void dwc3_free_trb_pool(struct dwc3_ep *dep)
 {
-	kfree(dep->trb_pool);
+	struct dwc3		*dwc = dep->dwc;
+
+	dma_free_coherent(dwc->dev, sizeof(struct dwc3_trb) * DWC3_TRB_NUM,
+			dep->trb_pool, dep->trb_pool_dma);
+
 	dep->trb_pool = NULL;
+	dep->trb_pool_dma = 0;
 }
 
 static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
@@ -329,15 +345,12 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 		/* Link TRB for ISOC. The HWO but is never reset */
 		trb_st_hw = &dep->trb_pool[0];
 
-		trb_link.bplh = virt_to_phys(trb_st_hw);
+		trb_link.bplh = dwc3_trb_dma_offset(dep, trb_st_hw);
 		trb_link.trbctl = DWC3_TRBCTL_LINK_TRB;
 		trb_link.hwo = true;
 
 		trb_link_hw = &dep->trb_pool[DWC3_TRB_NUM - 1];
 		dwc3_trb_to_hw(&trb_link, trb_link_hw);
-
-		dma_sync_single_for_device(dep->dwc->dev, virt_to_phys(trb_link_hw),
-				sizeof(trb_link_hw), DMA_TO_DEVICE);
 	}
 
 	return 0;
@@ -507,7 +520,6 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 	struct dwc3_request	*req, *n;
 	struct dwc3_trb_hw	*trb_hw;
 	struct dwc3_trb		trb;
-	struct dwc3		*dwc	= dep->dwc;
 	u32			trbs_left;
 
 	BUILD_BUG_ON_NOT_POWER_OF_2(DWC3_TRB_NUM);
@@ -611,8 +623,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		trb.hwo = true;
 
 		dwc3_trb_to_hw(&trb, trb_hw);
-		req->trb_dma = dma_map_single(dwc->dev, trb_hw, sizeof(*trb_hw),
-				DMA_BIDIRECTIONAL);
+		req->trb_dma = dwc3_trb_dma_offset(dep, trb_hw);
 
 		if (last_one)
 			break;
@@ -1241,8 +1252,6 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 		if (!req)
 			break;
 
-		dma_unmap_single(dwc->dev, req->trb_dma,
-				sizeof(struct dwc3_trb), DMA_BIDIRECTIONAL);
 		dwc3_trb_to_nat(req->trb, &trb);
 
 		if (trb.hwo) {
