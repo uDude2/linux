@@ -1871,6 +1871,10 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dwc->gadget.is_dualspeed	= true;
 	dwc->gadget.speed		= USB_SPEED_UNKNOWN;
 	dwc->gadget.dev.parent		= dwc->dev;
+
+	dma_set_coherent_mask(&dwc->gadget.dev, dwc->dev->coherent_dma_mask);
+
+	dwc->gadget.dev.dma_parms	= dwc->dev->dma_parms;
 	dwc->gadget.dev.dma_mask	= dwc->dev->dma_mask;
 	dwc->gadget.dev.release		= dwc3_gadget_release;
 	dwc->gadget.name		= "dwc3-gadget";
