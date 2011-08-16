@@ -298,7 +298,7 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	dwc = PTR_ALIGN(mem, DWC3_ALIGN_MASK + 1);
 	dwc->mem = mem;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dwc_usb3");
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "missing resource\n");
 		goto err1;
@@ -317,7 +317,7 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 		goto err2;
 	}
 
-	irq = platform_get_irq_byname(pdev, "dwc_usb3");
+	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		dev_err(&pdev->dev, "missing IRQ\n");
 		goto err3;
@@ -382,7 +382,7 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 	struct resource	*res;
 	unsigned int	features = id->driver_data;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dwc_usb3");
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, 0);
 
 	pm_runtime_put(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);

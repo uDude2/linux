@@ -253,14 +253,14 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, omap);
 
-	irq = platform_get_irq_byname(pdev, "wrapper");
+	irq = platform_get_irq(pdev, 1);
 	if (irq < 0) {
 		dev_err(&pdev->dev, "missing IRQ resource\n");
 		ret = -EINVAL;
 		goto err1;
 	}
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "wrapper");
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	if (!res) {
 		dev_err(&pdev->dev, "missing memory base resource\n");
 		ret = -EINVAL;
