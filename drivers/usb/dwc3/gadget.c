@@ -1328,7 +1328,6 @@ static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 	}
 
 	__dwc3_gadget_kick_transfer(dep, uf);
-	dep->flags |= DWC3_EP_ISOC_RUNNING;
 }
 
 static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
@@ -1368,7 +1367,6 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		break;
 	case DWC3_DEPEVT_XFERNOTREADY:
 		if (usb_endpoint_xfer_isoc(dep->desc)) {
-			dep->flags &= ~DWC3_EP_ISOC_RUNNING;
 			dwc3_gadget_start_isoc(dwc, dep, event);
 		} else {
 			int ret;
