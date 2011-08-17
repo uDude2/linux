@@ -44,6 +44,7 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/ioport.h>
+#include <linux/io.h>
 
 #include <asm/sizes.h>
 
@@ -126,27 +127,25 @@ struct dwc3_omap {
 };
 
 #ifdef CONFIG_PM
-static int dwc3_omap_runtime_suspend(struct device *dev)
+static int dwc3_omap_suspend(struct device *dev)
 {
 	struct dwc3_omap	*omap = dev_get_drvdata(dev);
 
-	/* REVISIT save context */
-	memcpy(omap->context, omap->base, SZ_4K);
+	memcpy_fromio(omap->context, omap->base, SZ_4K);
 
 	return 0;
 }
 
-static int dwc3_omap_runtime_resume(struct device *dev)
+static int dwc3_omap_resume(struct device *dev)
 {
 	struct dwc3_omap	*omap = dev_get_drvdata(dev);
 
-	/* REVISIT restore context */
-	memcpy(omap->base, omap->context, SZ_4K);
+	memcpy_toio(omap->base, omap->context, SZ_4K);
 
 	return 0;
 }
 
-static int dwc3_omap_runtime_idle(struct device *dev)
+static int dwc3_omap_idle(struct device *dev)
 {
 	struct dwc3_omap	*omap = dev_get_drvdata(dev);
 	u32			reg;
@@ -159,11 +158,8 @@ static int dwc3_omap_runtime_idle(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops dwc3_omap_pm_ops = {
-	.runtime_suspend	= dwc3_omap_runtime_suspend,
-	.runtime_resume		= dwc3_omap_runtime_resume,
-	.runtime_idle		= dwc3_omap_runtime_idle,
-};
+static UNIVERSAL_DEV_PM_OPS(dwc3_omap_pm_ops, dwc3_omap_suspend,
+		dwc3_omap_resume, dwc3_omap_idle);
 
 #define DEV_PM_OPS	(&dwc3_omap_pm_ops)
 #else

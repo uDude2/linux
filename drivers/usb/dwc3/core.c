@@ -68,10 +68,7 @@ static int dwc3_resume(struct device *dev)
 	return pm_runtime_get_sync(dev);
 }
 
-static const struct dev_pm_ops dwc3_pm_ops = {
-	.suspend	= dwc3_suspend,
-	.resume		= dwc3_resume,
-};
+static SIMPLE_DEV_PM_OPS(dwc3_pm_ops, dwc3_suspend, dwc3_resume);
 
 #define DEV_PM_OPS	(&dwc3_pm_ops)
 #else
