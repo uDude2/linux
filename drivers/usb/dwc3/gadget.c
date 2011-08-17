@@ -1435,31 +1435,34 @@ static void dwc3_gadget_nuke(struct dwc3_ep *dep, const int status)
 	}
 }
 
+static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum)
+{
+	struct dwc3_ep *dep;
+	struct dwc3_gadget_ep_cmd_params params;
+	u32 cmd;
+	int ret;
+
+	dep = dwc->eps[epnum];
+
+	if (!(dep->flags & DWC3_EP_ENABLED))
+		return;
+
+	cmd = DWC3_DEPCMD_ENDTRANSFER;
+	cmd |= DWC3_DEPCMD_HIPRI_FORCERM;
+	cmd |= DWC3_DEPCMD_PARAM(dep->res_trans_idx);
+	memset(&params, 0, sizeof(params));
+	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
+	WARN_ON_ONCE(ret);
+
+	dwc3_gadget_nuke(dep, -ESHUTDOWN);
+}
+
 static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 {
 	u32 epnum;
 
-	for (epnum = 2; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
-		struct dwc3_ep *dep;
-		struct dwc3_gadget_ep_cmd_params params;
-		u32 cmd;
-		int ret;
-
-		dep = dwc->eps[epnum];
-
-		if (!(dep->flags & DWC3_EP_ENABLED))
-			continue;
-
-		cmd = DWC3_DEPCMD_ENDTRANSFER;
-		cmd |= DWC3_DEPCMD_HIPRI_FORCERM;
-		cmd |= DWC3_DEPCMD_PARAM(dep->res_trans_idx);
-		memset(&params, 0, sizeof(params));
-		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
-		WARN_ON_ONCE(ret);
-
-		dwc3_gadget_nuke(dep, -ESHUTDOWN);
-
-	}
+	for (epnum = 2; epnum < DWC3_ENDPOINTS_NUM; epnum++)
+		dwc3_stop_active_transfer(dwc, epnum);
 }
 
 static void dwc3_clear_stall_all_ep(struct dwc3 *dwc)
