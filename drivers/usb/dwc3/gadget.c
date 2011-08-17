@@ -365,10 +365,14 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
  *
  * Caller should take care of locking
  */
+static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum);
 static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 {
 	struct dwc3		*dwc = dep->dwc;
 	u32			reg;
+
+	dep->flags &= ~DWC3_EP_ENABLED;
+	dwc3_stop_active_transfer(dwc, dep->number);
 
 	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 	reg &= ~DWC3_DALEPENA_EP(dep->number);
@@ -376,7 +380,6 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 
 	dep->desc = NULL;
 	dep->type = 0;
-	dep->flags &= ~DWC3_EP_ENABLED;
 
 	return 0;
 }
@@ -1469,7 +1472,7 @@ static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 		if (!(dep->flags & DWC3_EP_ENABLED))
 			continue;
 
-		dwc3_stop_active_transfer(dwc, epnum);
+		__dwc3_gadget_ep_disable(dep);
 	}
 }
 
