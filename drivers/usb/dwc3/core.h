@@ -347,6 +347,7 @@ struct dwc3_ep {
 #define DWC3_EP_WEDGE		(1 << 2)
 #define DWC3_EP_BUSY		(1 << 4)
 #define DWC3_EP_PENDING_REQUEST	(1 << 5)
+#define DWC3_EP_WILL_SHUTDOWN	(1 << 6)
 
 	unsigned		current_trb;
 
