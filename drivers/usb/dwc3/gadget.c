@@ -113,13 +113,13 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 
 	dwc3_unmap_buffer_from_dma(req);
 
-	spin_unlock(&dwc->lock);
-	req->request.complete(&req->dep->endpoint, &req->request);
-	spin_lock(&dwc->lock);
-
 	dev_dbg(dwc->dev, "request %p from %s completed %d/%d ===> %d\n",
 			req, dep->name, req->request.actual,
 			req->request.length, status);
+
+	spin_unlock(&dwc->lock);
+	req->request.complete(&req->dep->endpoint, &req->request);
+	spin_lock(&dwc->lock);
 }
 
 static const char *dwc3_gadget_ep_cmd_string(u8 cmd)
