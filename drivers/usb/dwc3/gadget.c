@@ -707,7 +707,8 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 	dep->flags |= DWC3_EP_BUSY;
 	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
 			dep->number);
-
+	if (!dep->res_trans_idx)
+		printk_once(KERN_ERR "%s() res_trans_idx is invalid\n", __func__);
 	return 0;
 }
 
@@ -1348,6 +1349,23 @@ static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 	__dwc3_gadget_kick_transfer(dep, uf, 1);
 }
 
+static void dwc3_ep_cmd_compl(struct dwc3_ep *dep,
+		const struct dwc3_event_depevt *event)
+{
+	u32 param = event->parameters;
+	u32 cmd_type = (param >> 8) & ((1 << 5) - 1);
+
+	switch (cmd_type) {
+	case DWC3_DEPCMD_STARTTRANSFER:
+		dep->res_trans_idx = param & 0x7f;
+		break;
+	default:
+		printk(KERN_ERR "%s() unknown /unexpected type: %d\n",
+				__func__, cmd_type);
+		break;
+	};
+}
+
 static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		const struct dwc3_event_depevt *event)
 {
@@ -1410,7 +1428,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		dev_dbg(dwc->dev, "%s Stream Event\n", dep->name);
 		break;
 	case DWC3_DEPEVT_EPCMDCMPLT:
-		dev_dbg(dwc->dev, "%s Command Complete\n", dep->name);
+		dwc3_ep_cmd_compl(dep, event);
 		break;
 	}
 }
