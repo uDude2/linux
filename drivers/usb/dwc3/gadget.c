@@ -113,13 +113,13 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 
 	dwc3_unmap_buffer_from_dma(req);
 
-	spin_unlock(&dwc->lock);
-	req->request.complete(&req->dep->endpoint, &req->request);
-	spin_lock(&dwc->lock);
-
 	dev_dbg(dwc->dev, "request %p from %s completed %d/%d ===> %d\n",
 			req, dep->name, req->request.actual,
 			req->request.length, status);
+
+	spin_unlock(&dwc->lock);
+	req->request.complete(&req->dep->endpoint, &req->request);
+	spin_lock(&dwc->lock);
 }
 
 static const char *dwc3_gadget_ep_cmd_string(u8 cmd)
@@ -167,8 +167,11 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	dwc3_writel(dwc->regs, DWC3_DEPCMD(ep), cmd | DWC3_DEPCMD_CMDACT);
 	do {
 		reg = dwc3_readl(dwc->regs, DWC3_DEPCMD(ep));
-		if (!(reg & DWC3_DEPCMD_CMDACT))
+		if (!(reg & DWC3_DEPCMD_CMDACT)) {
+			dev_vdbg(dwc->dev, "CMD Compl Status %d DEPCMD %04x\n",
+					((reg & 0xf000) >> 12), reg);
 			return 0;
+		}
 
 		/*
 		 * XXX Figure out a sane timeout here. 500ms is way too much.
@@ -583,6 +586,16 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		if (list_empty(&dep->request_list))
 			last_one = 1;
 
+		/*
+		 * FIXME we shouldn't need to set LST bit always but we are
+		 * facing some weird problem with the Hardware where it doesn't
+		 * complete even though it has been previously started.
+		 *
+		 * While we're debugging the problem, as a workaround to
+		 * multiple TRBs handling, use only one TRB at a time.
+		 */
+		last_one = 1;
+
 		req->trb = trb_hw;
 
 		trb.bplh = req->request.dma;
@@ -630,7 +643,8 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 	}
 }
 
-static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
+static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
+		int start_new)
 {
 	struct dwc3_gadget_ep_cmd_params params;
 	struct dwc3_request		*req;
@@ -638,20 +652,27 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	int				ret;
 	u32				cmd;
 
-	if (dep->flags & DWC3_EP_BUSY)
+	if (start_new && (dep->flags & DWC3_EP_BUSY)) {
+		dev_vdbg(dwc->dev, "%s: endpoint busy\n", dep->name);
 		return -EBUSY;
+	}
 	dep->flags &= ~DWC3_EP_PENDING_REQUEST;
 
 	/*
 	 * If we are getting here after a short-out-packet we don't enqueue any
 	 * new requests as we try to set the IOC bit only on the last request.
 	 */
-	if (list_empty(&dep->req_queued))
-		dwc3_prepare_trbs(dep, true);
-	req = next_request(&dep->req_queued);
-	if (!req) {
-		dep->flags |= DWC3_EP_PENDING_REQUEST;
-		return 0;
+	if (start_new) {
+		if (!list_empty(&dep->req_queued))
+			dwc3_prepare_trbs(dep, true);
+		req = next_request(&dep->req_queued);
+		if (!req) {
+			dep->flags |= DWC3_EP_PENDING_REQUEST;
+			return 0;
+		}
+	} else {
+		/* maybe we could return here if we did not prepare anythign */
+		dwc3_prepare_trbs(dep, false);
 	}
 
 	memset(&params, 0, sizeof(params));
@@ -660,7 +681,12 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	params.param1.depstrtxfer.transfer_desc_addr_low =
 		lower_32_bits(req->trb_dma);
 
-	cmd = DWC3_DEPCMD_STARTTRANSFER | DWC3_DEPCMD_PARAM(cmd_param);
+	if (start_new)
+		cmd = DWC3_DEPCMD_STARTTRANSFER;
+	else
+		cmd = DWC3_DEPCMD_UPDATETRANSFER;
+
+	cmd |= DWC3_DEPCMD_PARAM(cmd_param);
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
 	if (ret < 0) {
 		dev_dbg(dwc->dev, "failed to send STARTTRANSFER command\n");
@@ -719,7 +745,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	if (dep->flags & DWC3_EP_PENDING_REQUEST) {
 		int ret;
 
-		ret =  __dwc3_gadget_kick_transfer(dep, 0);
+		ret =  __dwc3_gadget_kick_transfer(dep, 0, 1);
 		if (ret && ret != -EBUSY) {
 			struct dwc3	*dwc = dep->dwc;
 
@@ -1237,7 +1263,8 @@ static void dwc3_gadget_release(struct device *dev)
 /* -------------------------------------------------------------------------- */
 
 static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
-		struct dwc3_ep *dep, const struct dwc3_event_depevt *event)
+		struct dwc3_ep *dep, const struct dwc3_event_depevt *event,
+		int start_new)
 {
 	struct dwc3_request	*req;
 	struct dwc3_trb         trb;
@@ -1312,8 +1339,7 @@ static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 		uf = 0;
 	}
 
-	__dwc3_gadget_kick_transfer(dep, uf);
-	dep->flags |= DWC3_EP_ISOC_RUNNING;
+	__dwc3_gadget_kick_transfer(dep, uf, 1);
 }
 
 static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
@@ -1340,7 +1366,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 			return;
 		}
 
-		dwc3_endpoint_transfer_complete(dwc, dep, event);
+		dwc3_endpoint_transfer_complete(dwc, dep, event, 1);
 		break;
 	case DWC3_DEPEVT_XFERINPROGRESS:
 		if (!usb_endpoint_xfer_isoc(dep->desc)) {
@@ -1349,16 +1375,20 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 			return;
 		}
 
-		dwc3_endpoint_transfer_complete(dwc, dep, event);
+		dwc3_endpoint_transfer_complete(dwc, dep, event, 0);
 		break;
 	case DWC3_DEPEVT_XFERNOTREADY:
 		if (usb_endpoint_xfer_isoc(dep->desc)) {
-			dep->flags &= ~DWC3_EP_ISOC_RUNNING;
 			dwc3_gadget_start_isoc(dwc, dep, event);
 		} else {
 			int ret;
 
-			ret = __dwc3_gadget_kick_transfer(dep, 0);
+			dev_vdbg(dwc->dev, "%s: reason %s\n",
+					dep->name, event->status
+					? "Transfer Active"
+					: "Transfer Not Active");
+
+			ret = __dwc3_gadget_kick_transfer(dep, 0, 1);
 			if (!ret || ret == -EBUSY)
 				return;
 
