@@ -167,8 +167,11 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 	dwc3_writel(dwc->regs, DWC3_DEPCMD(ep), cmd | DWC3_DEPCMD_CMDACT);
 	do {
 		reg = dwc3_readl(dwc->regs, DWC3_DEPCMD(ep));
-		if (!(reg & DWC3_DEPCMD_CMDACT))
+		if (!(reg & DWC3_DEPCMD_CMDACT)) {
+			dev_vdbg(dwc->dev, "CMD Compl Status %d DEPCMD %04x\n",
+					((reg & 0xf000) >> 12), reg);
 			return 0;
+		}
 
 		/*
 		 * XXX Figure out a sane timeout here. 500ms is way too much.
@@ -638,8 +641,10 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param)
 	int				ret;
 	u32				cmd;
 
-	if (dep->flags & DWC3_EP_BUSY)
+	if (dep->flags & DWC3_EP_BUSY) {
+		dev_vdbg(dwc->dev, "%s: endpoint busy\n", dep->name);
 		return -EBUSY;
+	}
 	dep->flags &= ~DWC3_EP_PENDING_REQUEST;
 
 	/*
@@ -1357,6 +1362,11 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 			dwc3_gadget_start_isoc(dwc, dep, event);
 		} else {
 			int ret;
+
+			dev_vdbg(dwc->dev, "%s: reason %s\n",
+					dep->name, event->status
+					? "Transfer Active"
+					: "Transfer Not Active");
 
 			ret = __dwc3_gadget_kick_transfer(dep, 0);
 			if (!ret || ret == -EBUSY)
