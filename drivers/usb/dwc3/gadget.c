@@ -1265,19 +1265,14 @@ static void dwc3_gadget_release(struct device *dev)
 }
 
 /* -------------------------------------------------------------------------- */
-
-static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
-		struct dwc3_ep *dep, const struct dwc3_event_depevt *event,
-		int start_new)
+static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
+		const struct dwc3_event_depevt *event, int status)
 {
 	struct dwc3_request	*req;
 	struct dwc3_trb         trb;
-	unsigned		status = 0;
 	unsigned int		count;
 	unsigned int		s_pkt = 0;
 
-	if (event->status & DEPEVT_STATUS_BUSERR)
-		status = -ECONNRESET;
 	do {
 		req = next_request(&dep->req_queued);
 		if (!req)
@@ -1320,7 +1315,23 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 			break;
 	} while (1);
 
-	if (!trb.ioc)
+	if ((event->status & DEPEVT_STATUS_IOC) && trb.ioc)
+		return 0;
+	return 1;
+}
+
+static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
+		struct dwc3_ep *dep, const struct dwc3_event_depevt *event,
+		int start_new)
+{
+	unsigned		status = 0;
+	int			clean_busy;
+
+	if (event->status & DEPEVT_STATUS_BUSERR)
+		status = -ECONNRESET;
+
+	clean_busy =  dwc3_cleanup_done_reqs(dwc, dep, event, status);
+	if (clean_busy)
 		dep->flags &= ~DWC3_EP_BUSY;
 }
 
