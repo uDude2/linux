@@ -1315,9 +1315,12 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 			break;
 		if ((event->status & DEPEVT_STATUS_LST) && trb.lst)
 			break;
+		if ((event->status & DEPEVT_STATUS_IOC) && trb.ioc)
+			break;
 	} while (1);
 
-	dep->flags &= ~DWC3_EP_BUSY;
+	if (!trb.ioc)
+		dep->flags &= ~DWC3_EP_BUSY;
 }
 
 static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
