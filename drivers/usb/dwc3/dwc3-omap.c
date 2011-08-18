@@ -120,7 +120,7 @@ struct dwc3_omap {
 	void __iomem		*base;
 
 	void			*context;
-	u32			resource_size __read_mostly;
+	u32			resource_size;
 
 	u32			dma_status:1;
 };
