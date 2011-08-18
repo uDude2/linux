@@ -680,7 +680,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 	 * new requests as we try to set the IOC bit only on the last request.
 	 */
 	if (start_new) {
-		if (!list_empty(&dep->req_queued))
+		if (list_empty(&dep->req_queued))
 			dwc3_prepare_trbs(dep, true);
 		req = next_request(&dep->req_queued);
 		if (!req) {
