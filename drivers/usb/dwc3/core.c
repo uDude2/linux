@@ -57,24 +57,6 @@
 
 #include "debug.h"
 
-#ifdef CONFIG_PM
-static int dwc3_suspend(struct device *dev)
-{
-	return pm_runtime_put_sync(dev);
-}
-
-static int dwc3_resume(struct device *dev)
-{
-	return pm_runtime_get_sync(dev);
-}
-
-static SIMPLE_DEV_PM_OPS(dwc3_pm_ops, dwc3_suspend, dwc3_resume);
-
-#define DEV_PM_OPS	(&dwc3_pm_ops)
-#else
-#define DEV_PM_OPS	NULL
-#endif
-
 /**
  * dwc3_free_one_event_buffer - Frees one event buffer
  * @dwc: Pointer to our controller context structure
@@ -420,7 +402,6 @@ static struct platform_driver dwc3_driver = {
 	.remove		= __devexit_p(dwc3_remove),
 	.driver		= {
 		.name	= "dwc3",
-		.pm	= DEV_PM_OPS,
 	},
 	.id_table	= dwc3_id_table,
 };
