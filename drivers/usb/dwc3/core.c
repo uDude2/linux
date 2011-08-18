@@ -268,10 +268,6 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	int			irq;
 	void			*mem;
 
-	pm_runtime_enable(&pdev->dev);
-	pm_runtime_get_sync(&pdev->dev);
-	pm_runtime_forbid(&pdev->dev);
-
 	mem = kzalloc(sizeof(*dwc) + DWC3_ALIGN_MASK, GFP_KERNEL);
 	if (!mem) {
 		dev_err(&pdev->dev, "not enough memory\n");
@@ -312,6 +308,10 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	dwc->regs_size	= resource_size(res);
 	dwc->dev	= &pdev->dev;
 	dwc->irq	= irq;
+
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_get_sync(&pdev->dev);
+	pm_runtime_forbid(&pdev->dev);
 
 	ret = dwc3_core_init(dwc);
 	if (ret) {
