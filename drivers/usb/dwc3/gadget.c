@@ -359,16 +359,34 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	return 0;
 }
 
+static void dwc3_gadget_nuke_reqs(struct dwc3_ep *dep, const int status)
+{
+	struct dwc3_request		*req;
+
+	while (!list_empty(&dep->request_list)) {
+		req = next_request(&dep->request_list);
+
+		dwc3_gadget_giveback(dep, req, status);
+	}
+	/* nuke queued TRBs as well on command complete */
+	dep->flags |= DWC3_EP_WILL_SHUTDOWN;
+}
+
 /**
  * __dwc3_gadget_ep_disable - Disables a HW endpoint
  * @dep: the endpoint to disable
  *
  * Caller should take care of locking
  */
+static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum);
 static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 {
 	struct dwc3		*dwc = dep->dwc;
 	u32			reg;
+
+	dep->flags &= ~DWC3_EP_ENABLED;
+	dwc3_stop_active_transfer(dwc, dep->number);
+	dwc3_gadget_nuke_reqs(dep, -ESHUTDOWN);
 
 	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 	reg &= ~DWC3_DALEPENA_EP(dep->number);
@@ -376,7 +394,6 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 
 	dep->desc = NULL;
 	dep->type = 0;
-	dep->flags &= ~DWC3_EP_ENABLED;
 
 	return 0;
 }
@@ -704,7 +721,8 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 	dep->flags |= DWC3_EP_BUSY;
 	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
 			dep->number);
-
+	if (!dep->res_trans_idx)
+		printk_once(KERN_ERR "%s() res_trans_idx is invalid\n", __func__);
 	return 0;
 }
 
@@ -809,8 +827,8 @@ static int dwc3_gadget_ep_dequeue(struct usb_ep *ep,
 				break;
 		}
 		if (r == req) {
-			ret = -EBUSY;
 			/* wait until it is processed */
+			dwc3_stop_active_transfer(dwc, dep->number);
 			goto out0;
 		}
 		dev_err(dwc->dev, "request %p was not queued to %s\n",
@@ -1261,19 +1279,14 @@ static void dwc3_gadget_release(struct device *dev)
 }
 
 /* -------------------------------------------------------------------------- */
-
-static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
-		struct dwc3_ep *dep, const struct dwc3_event_depevt *event,
-		int start_new)
+static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
+		const struct dwc3_event_depevt *event, int status)
 {
 	struct dwc3_request	*req;
 	struct dwc3_trb         trb;
-	unsigned		status = 0;
 	unsigned int		count;
 	unsigned int		s_pkt = 0;
 
-	if (event->status & DEPEVT_STATUS_BUSERR)
-		status = -ECONNRESET;
 	do {
 		req = next_request(&dep->req_queued);
 		if (!req)
@@ -1312,9 +1325,28 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 			break;
 		if ((event->status & DEPEVT_STATUS_LST) && trb.lst)
 			break;
+		if ((event->status & DEPEVT_STATUS_IOC) && trb.ioc)
+			break;
 	} while (1);
 
-	dep->flags &= ~DWC3_EP_BUSY;
+	if ((event->status & DEPEVT_STATUS_IOC) && trb.ioc)
+		return 0;
+	return 1;
+}
+
+static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
+		struct dwc3_ep *dep, const struct dwc3_event_depevt *event,
+		int start_new)
+{
+	unsigned		status = 0;
+	int			clean_busy;
+
+	if (event->status & DEPEVT_STATUS_BUSERR)
+		status = -ECONNRESET;
+
+	clean_busy =  dwc3_cleanup_done_reqs(dwc, dep, event, status);
+	if (clean_busy)
+		dep->flags &= ~DWC3_EP_BUSY;
 }
 
 static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
@@ -1340,6 +1372,56 @@ static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 	}
 
 	__dwc3_gadget_kick_transfer(dep, uf, 1);
+}
+
+static void dwc3_process_ep_cmd_complete(struct dwc3_ep *dep,
+		const struct dwc3_event_depevt *event)
+{
+	struct dwc3 *dwc = dep->dwc;
+	struct dwc3_event_depevt mod_ev = *event;
+
+	/*
+	 * We were asked to remove one requests. It is possible that this
+	 * request and a few other were started together and have the same
+	 * transfer index. Since we stopped the complete endpoint we don't
+	 * know how many requests were already completed (and not yet)
+	 * reported and how could be done (later). We purge them all until
+	 * the end of the list.
+	 */
+	mod_ev.status = DEPEVT_STATUS_LST;
+	dwc3_cleanup_done_reqs(dwc, dep, &mod_ev, -ESHUTDOWN);
+	dep->flags &= ~DWC3_EP_BUSY;
+	/* pending requets are ignored and are queued on XferNotReady */
+
+	if (dep->flags & DWC3_EP_WILL_SHUTDOWN) {
+		while (!list_empty(&dep->req_queued)) {
+			struct dwc3_request	*req;
+
+			req = next_request(&dep->req_queued);
+			dwc3_gadget_giveback(dep, req, -ESHUTDOWN);
+		}
+		dep->flags &= DWC3_EP_WILL_SHUTDOWN;
+	}
+}
+
+static void dwc3_ep_cmd_compl(struct dwc3_ep *dep,
+		const struct dwc3_event_depevt *event)
+{
+	u32 param = event->parameters;
+	u32 cmd_type = (param >> 8) & ((1 << 5) - 1);
+
+	switch (cmd_type) {
+	case DWC3_DEPCMD_ENDTRANSFER:
+		dwc3_process_ep_cmd_complete(dep, event);
+		break;
+	case DWC3_DEPCMD_STARTTRANSFER:
+		dep->res_trans_idx = param & 0x7f;
+		break;
+	default:
+		printk(KERN_ERR "%s() unknown /unexpected type: %d\n",
+				__func__, cmd_type);
+		break;
+	};
 }
 
 static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
@@ -1404,7 +1486,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		dev_dbg(dwc->dev, "%s Stream Event\n", dep->name);
 		break;
 	case DWC3_DEPEVT_EPCMDCMPLT:
-		dev_dbg(dwc->dev, "%s Command Complete\n", dep->name);
+		dwc3_ep_cmd_compl(dep, event);
 		break;
 	}
 }
@@ -1418,20 +1500,22 @@ static void dwc3_disconnect_gadget(struct dwc3 *dwc)
 	}
 }
 
-static void dwc3_gadget_nuke(struct dwc3_ep *dep, const int status)
+static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum)
 {
-	struct dwc3_request		*req;
+	struct dwc3_ep *dep;
+	struct dwc3_gadget_ep_cmd_params params;
+	u32 cmd;
+	int ret;
 
-	while (!list_empty(&dep->request_list)) {
-		req = next_request(&dep->request_list);
+	dep = dwc->eps[epnum];
 
-		dwc3_gadget_giveback(dep, req, status);
-	}
-
-	while (!list_empty(&dep->req_queued)) {
-		req = next_request(&dep->req_queued);
-
-		dwc3_gadget_giveback(dep, req, status);
+	if (dep->res_trans_idx) {
+		cmd = DWC3_DEPCMD_ENDTRANSFER;
+		cmd |= DWC3_DEPCMD_HIPRI_FORCERM | DWC3_DEPCMD_CMDIOC;
+		cmd |= DWC3_DEPCMD_PARAM(dep->res_trans_idx);
+		memset(&params, 0, sizeof(params));
+		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
+		WARN_ON_ONCE(ret);
 	}
 }
 
@@ -1441,24 +1525,12 @@ static void dwc3_stop_active_transfers(struct dwc3 *dwc)
 
 	for (epnum = 2; epnum < DWC3_ENDPOINTS_NUM; epnum++) {
 		struct dwc3_ep *dep;
-		struct dwc3_gadget_ep_cmd_params params;
-		u32 cmd;
-		int ret;
 
 		dep = dwc->eps[epnum];
-
 		if (!(dep->flags & DWC3_EP_ENABLED))
 			continue;
 
-		cmd = DWC3_DEPCMD_ENDTRANSFER;
-		cmd |= DWC3_DEPCMD_HIPRI_FORCERM;
-		cmd |= DWC3_DEPCMD_PARAM(dep->res_trans_idx);
-		memset(&params, 0, sizeof(params));
-		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
-		WARN_ON_ONCE(ret);
-
-		dwc3_gadget_nuke(dep, -ESHUTDOWN);
-
+		__dwc3_gadget_ep_disable(dep);
 	}
 }
 

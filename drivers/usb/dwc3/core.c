@@ -57,24 +57,6 @@
 
 #include "debug.h"
 
-#ifdef CONFIG_PM
-static int dwc3_suspend(struct device *dev)
-{
-	return pm_runtime_put_sync(dev);
-}
-
-static int dwc3_resume(struct device *dev)
-{
-	return pm_runtime_get_sync(dev);
-}
-
-static SIMPLE_DEV_PM_OPS(dwc3_pm_ops, dwc3_suspend, dwc3_resume);
-
-#define DEV_PM_OPS	(&dwc3_pm_ops)
-#else
-#define DEV_PM_OPS	NULL
-#endif
-
 /**
  * dwc3_free_one_event_buffer - Frees one event buffer
  * @dwc: Pointer to our controller context structure
@@ -286,10 +268,6 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	int			irq;
 	void			*mem;
 
-	pm_runtime_enable(&pdev->dev);
-	pm_runtime_get_sync(&pdev->dev);
-	pm_runtime_forbid(&pdev->dev);
-
 	mem = kzalloc(sizeof(*dwc) + DWC3_ALIGN_MASK, GFP_KERNEL);
 	if (!mem) {
 		dev_err(&pdev->dev, "not enough memory\n");
@@ -298,7 +276,7 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	dwc = PTR_ALIGN(mem, DWC3_ALIGN_MASK + 1);
 	dwc->mem = mem;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dwc_usb3");
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
 		dev_err(&pdev->dev, "missing resource\n");
 		goto err1;
@@ -317,7 +295,7 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 		goto err2;
 	}
 
-	irq = platform_get_irq_byname(pdev, "dwc_usb3");
+	irq = platform_get_irq(pdev, 0);
 	if (irq < 0) {
 		dev_err(&pdev->dev, "missing IRQ\n");
 		goto err3;
@@ -330,6 +308,10 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	dwc->regs_size	= resource_size(res);
 	dwc->dev	= &pdev->dev;
 	dwc->irq	= irq;
+
+	pm_runtime_enable(&pdev->dev);
+	pm_runtime_get_sync(&pdev->dev);
+	pm_runtime_forbid(&pdev->dev);
 
 	ret = dwc3_core_init(dwc);
 	if (ret) {
@@ -382,7 +364,7 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 	struct resource	*res;
 	unsigned int	features = id->driver_data;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dwc_usb3");
+	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, 0);
 
 	pm_runtime_put(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
@@ -420,7 +402,6 @@ static struct platform_driver dwc3_driver = {
 	.remove		= __devexit_p(dwc3_remove),
 	.driver		= {
 		.name	= "dwc3",
-		.pm	= DEV_PM_OPS,
 	},
 	.id_table	= dwc3_id_table,
 };

@@ -46,8 +46,6 @@
 #include <linux/ioport.h>
 #include <linux/io.h>
 
-#include <asm/sizes.h>
-
 #include "io.h"
 
 /*
@@ -121,7 +119,8 @@ struct dwc3_omap {
 	int			irq;
 	void __iomem		*base;
 
-	char			context[SZ_4K];
+	void			*context;
+	const u32		resource_size;
 
 	u32			dma_status:1;
 };
@@ -131,7 +130,7 @@ static int dwc3_omap_suspend(struct device *dev)
 {
 	struct dwc3_omap	*omap = dev_get_drvdata(dev);
 
-	memcpy_fromio(omap->context, omap->base, SZ_4K);
+	memcpy_fromio(omap->context, omap->base, omap->resource_size);
 
 	return 0;
 }
@@ -140,7 +139,7 @@ static int dwc3_omap_resume(struct device *dev)
 {
 	struct dwc3_omap	*omap = dev_get_drvdata(dev);
 
-	memcpy_toio(omap->base, omap->context, SZ_4K);
+	memcpy_toio(omap->base, omap->context, omap->resource_size);
 
 	return 0;
 }
@@ -244,6 +243,7 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 	u32			reg;
 
 	void __iomem		*base;
+	void			*context;
 
 	omap = kzalloc(sizeof(*omap), GFP_KERNEL);
 	if (!omap) {
@@ -253,14 +253,14 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, omap);
 
-	irq = platform_get_irq_byname(pdev, "wrapper");
+	irq = platform_get_irq(pdev, 1);
 	if (irq < 0) {
 		dev_err(&pdev->dev, "missing IRQ resource\n");
 		ret = -EINVAL;
 		goto err1;
 	}
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "wrapper");
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	if (!res) {
 		dev_err(&pdev->dev, "missing memory base resource\n");
 		ret = -EINVAL;
@@ -279,12 +279,20 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 		goto err2;
 	}
 
+	context = kzalloc(resource_size(res), GFP_KERNEL);
+	if (!context) {
+		dev_err(&pdev->dev, "couldn't allocate dwc3 context memory\n");
+		goto err3;
+	}
+
 	spin_lock_init(&omap->lock);
 	dma_set_coherent_mask(&dwc3->dev, pdev->dev.coherent_dma_mask);
 
 	dwc3->dev.parent = &pdev->dev;
 	dwc3->dev.dma_mask = pdev->dev.dma_mask;
 	dwc3->dev.dma_parms = pdev->dev.dma_parms;
+	omap->resource_size = resource_size(res);
+	omap->context	= context;
 	omap->dev	= &pdev->dev;
 	omap->irq	= irq;
 	omap->base	= base;
@@ -299,7 +307,7 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 	if (ret) {
 		dev_err(&pdev->dev, "failed to request IRQ #%d --> %d\n",
 				omap->irq, ret);
-		goto err3;
+		goto err4;
 	}
 
 	/* enable all IRQs */
@@ -322,19 +330,22 @@ static int __devinit dwc3_omap_probe(struct platform_device *pdev)
 			pdev->num_resources);
 	if (ret) {
 		dev_err(&pdev->dev, "couldn't add resources to dwc3 device\n");
-		goto err4;
+		goto err5;
 	}
 
 	ret = platform_device_add(dwc3);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register dwc3 device\n");
-		goto err4;
+		goto err5;
 	}
 
 	return 0;
 
-err4:
+err5:
 	free_irq(omap->irq, omap);
+
+err4:
+	kfree(omap->context);
 
 err3:
 	platform_device_put(dwc3);
@@ -358,10 +369,19 @@ static int __devexit dwc3_omap_remove(struct platform_device *pdev)
 	free_irq(omap->irq, omap);
 	iounmap(omap->base);
 
+	kfree(omap->context);
 	kfree(omap);
 
 	return 0;
 }
+
+static const struct of_device_id of_dwc3_matach[] = {
+	{
+		"ti,dwc3",
+	},
+	{ },
+};
+MODULE_DEVICE_TABLE(of, of_dwc3_matach);
 
 static struct platform_driver dwc3_omap_driver = {
 	.probe		= dwc3_omap_probe,
@@ -369,6 +389,7 @@ static struct platform_driver dwc3_omap_driver = {
 	.driver		= {
 		.name	= "omap-dwc3",
 		.pm	= DEV_PM_OPS,
+		.of_match_table	= of_dwc3_matach,
 	},
 };
 
