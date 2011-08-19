@@ -46,10 +46,47 @@
 #define PCI_VENDOR_ID_SYNOPSYS		0x16c3
 #define PCI_DEVICE_ID_SYNOPSYS_HAPSUSB3	0xabcd
 
+#define DWC3_PCI_DEVS_POSSIBLE	32
+
 struct dwc3_pci {
 	struct device		*dev;
 	struct platform_device	*dwc3;
 };
+
+static DECLARE_BITMAP(dwc3_pci_devs, DWC3_PCI_DEVS_POSSIBLE);
+
+static int dwc3_pci_get_device_id(struct dwc3_pci *glue)
+{
+	int		id;
+
+again:
+	id = find_first_zero_bit(dwc3_pci_devs, DWC3_PCI_DEVS_POSSIBLE);
+	if (id < DWC3_PCI_DEVS_POSSIBLE) {
+		int old;
+
+		old = test_and_set_bit(id, dwc3_pci_devs);
+		if (old)
+			goto again;
+	} else {
+		dev_err(glue->dev, "no space for new device\n");
+		id = -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void dwc3_pci_put_device_id(struct dwc3_pci *glue, int id)
+{
+	int			ret;
+
+	if (id < 0)
+		return;
+
+	ret = test_bit(id, dwc3_pci_devs);
+	WARN(!ret, "Device: %s\nID %d not in use\n",
+			dev_driver_string(glue->dev), id);
+	clear_bit(id, dwc3_pci_devs);
+}
 
 static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 		const struct pci_device_id *id)
@@ -58,12 +95,15 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 	struct platform_device	*dwc3;
 	struct dwc3_pci		*glue;
 	int			ret = -ENOMEM;
+	int			devid;
 
 	glue = kzalloc(sizeof(*glue), GFP_KERNEL);
 	if (!glue) {
 		dev_err(&pci->dev, "not enough memory\n");
 		goto err0;
 	}
+
+	glue->dev	= &pci->dev;
 
 	ret = pci_enable_device(pci);
 	if (ret) {
@@ -74,10 +114,14 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 	pci_set_power_state(pci, PCI_D0);
 	pci_set_master(pci);
 
-	dwc3 = platform_device_alloc("dwc3-pci", -1);
+	devid = dwc3_pci_get_device_id(glue);
+	if (devid < 0)
+		goto err2;
+
+	dwc3 = platform_device_alloc("dwc3-pci", devid);
 	if (!dwc3) {
 		dev_err(&pci->dev, "couldn't allocate dwc3 device\n");
-		goto err2;
+		goto err3;
 	}
 
 	memset(res, 0x00, sizeof(struct resource) * ARRAY_SIZE(res));
@@ -94,7 +138,7 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 	ret = platform_device_add_resources(dwc3, res, ARRAY_SIZE(res));
 	if (ret) {
 		dev_err(&pci->dev, "couldn't add resources to dwc3 device\n");
-		goto err3;
+		goto err4;
 	}
 
 	pci_set_drvdata(pci, glue);
@@ -104,20 +148,22 @@ static int __devinit dwc3_pci_probe(struct pci_dev *pci,
 	dwc3->dev.dma_mask = pci->dev.dma_mask;
 	dwc3->dev.dma_parms = pci->dev.dma_parms;
 	dwc3->dev.parent = &pci->dev;
-	glue->dev	= &pci->dev;
 	glue->dwc3	= dwc3;
 
 	ret = platform_device_add(dwc3);
 	if (ret) {
 		dev_err(&pci->dev, "failed to register dwc3 device\n");
-		goto err3;
+		goto err4;
 	}
 
 	return 0;
 
-err3:
+err4:
 	pci_set_drvdata(pci, NULL);
 	platform_device_put(dwc3);
+
+err3:
+	dwc3_pci_put_device_id(glue, devid);
 
 err2:
 	pci_disable_device(pci);
@@ -133,6 +179,7 @@ static void __devexit dwc3_pci_remove(struct pci_dev *pci)
 {
 	struct dwc3_pci	*glue = pci_get_drvdata(pci);
 
+	dwc3_pci_put_device_id(glue, glue->dwc3->id);
 	platform_device_unregister(glue->dwc3);
 	pci_set_drvdata(pci, NULL);
 	pci_disable_device(pci);
