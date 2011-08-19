@@ -535,9 +535,10 @@ static void dwc3_gadget_ep_free_request(struct usb_ep *ep,
  * transfers. The functions returns once there are not more TRBs available or
  * it run out of requests.
  */
-static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
+static struct dwc3_request *dwc3_prepare_trbs(struct dwc3_ep *dep,
+		bool starting)
 {
-	struct dwc3_request	*req, *n;
+	struct dwc3_request	*req, *n, *ret = NULL;
 	struct dwc3_trb_hw	*trb_hw;
 	struct dwc3_trb		trb;
 	u32			trbs_left;
@@ -553,7 +554,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 	 */
 	if (!trbs_left) {
 		if (!starting)
-			return;
+			return NULL;
 		trbs_left = DWC3_TRB_NUM;
 		/*
 		 * In case we start from scratch, we queue the ISOC requests
@@ -577,7 +578,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 
 	/* The last TRB is a link TRB, not used for xfer */
 	if ((trbs_left <= 1) && usb_endpoint_xfer_isoc(dep->desc))
-		return;
+		return NULL;
 
 	list_for_each_entry_safe(req, n, &dep->request_list, list) {
 		unsigned int last_one = 0;
@@ -614,6 +615,8 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		last_one = 1;
 
 		req->trb = trb_hw;
+		if (!ret)
+			ret = req;
 
 		trb.bplh = req->request.dma;
 
@@ -658,6 +661,8 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		if (last_one)
 			break;
 	}
+
+	return ret;
 }
 
 static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
@@ -681,15 +686,20 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 	 */
 	if (start_new) {
 		if (list_empty(&dep->req_queued))
-			dwc3_prepare_trbs(dep, true);
+			dwc3_prepare_trbs(dep, start_new);
+
+		/* req points to the first request which will be sent */
 		req = next_request(&dep->req_queued);
-		if (!req) {
-			dep->flags |= DWC3_EP_PENDING_REQUEST;
-			return 0;
-		}
 	} else {
-		/* maybe we could return here if we did not prepare anythign */
-		dwc3_prepare_trbs(dep, false);
+		/*
+		 * req points to the first request where HWO changed
+		 * from 0 to 1
+		 */
+		req = dwc3_prepare_trbs(dep, start_new);
+	}
+	if (!req) {
+		dep->flags |= DWC3_EP_PENDING_REQUEST;
+		return 0;
 	}
 
 	memset(&params, 0, sizeof(params));
@@ -762,8 +772,14 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	 */
 	if (dep->flags & DWC3_EP_PENDING_REQUEST) {
 		int ret;
+		int start_trans;
 
-		ret =  __dwc3_gadget_kick_transfer(dep, 0, 1);
+		start_trans = 1;
+		if (usb_endpoint_xfer_isoc(dep->endpoint.desc) &&
+				dep->flags & DWC3_EP_BUSY)
+			start_trans = 0;
+
+		ret =  __dwc3_gadget_kick_transfer(dep, 0, start_trans);
 		if (ret && ret != -EBUSY) {
 			struct dwc3	*dwc = dep->dwc;
 
@@ -1557,38 +1573,6 @@ static void dwc3_clear_stall_all_ep(struct dwc3 *dwc)
 	}
 }
 
-static void dwc3_gadget_usb3_phy_reset(struct dwc3 *dwc)
-{
-	u32			reg;
-
-	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
-	reg |= DWC3_GUSB3PIPECTL_PHYSOFTRST;
-	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
-
-	mdelay(10);
-
-	reg &= ~DWC3_GUSB3PIPECTL_PHYSOFTRST;
-	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
-
-	mdelay(10);
-}
-
-static void dwc3_gadget_usb2_phy_reset(struct dwc3 *dwc)
-{
-	u32			reg;
-
-	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
-	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
-	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
-
-	mdelay(10);
-
-	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
-	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
-
-	mdelay(10);
-}
-
 static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 {
 	dev_vdbg(dwc->dev, "%s\n", __func__);
@@ -1609,9 +1593,6 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	dwc3_disconnect_gadget(dwc);
 
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
-
-	dwc3_gadget_usb2_phy_reset(dwc);
-	dwc3_gadget_usb3_phy_reset(dwc);
 }
 
 static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
@@ -1985,10 +1966,6 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	 * REVISIT: Here we should clear all pending IRQs to be
 	 * sure we're starting from a well known location.
 	 */
-
-	/* RESET USB PHYs during initialization */
-	dwc3_gadget_usb2_phy_reset(dwc);
-	dwc3_gadget_usb3_phy_reset(dwc);
 
 	ret = dwc3_gadget_init_endpoints(dwc);
 	if (ret)

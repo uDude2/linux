@@ -507,7 +507,7 @@ static struct usb_ss_ep_comp_descriptor fsg_ss_bulk_in_comp_desc = {
 	.bLength =		sizeof(fsg_ss_bulk_in_comp_desc),
 	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
 
-	.bMaxBurst =		cpu_to_le16(2),
+	/*.bMaxBurst =		DYNAMIC, */
 };
 
 static struct usb_endpoint_descriptor
@@ -524,7 +524,7 @@ static struct usb_ss_ep_comp_descriptor fsg_ss_bulk_out_comp_desc = {
 	.bLength =		sizeof(fsg_ss_bulk_in_comp_desc),
 	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
 
-	.bMaxBurst =		cpu_to_le16(2),
+	/*.bMaxBurst =		DYNAMIC, */
 };
 
 #ifndef FSG_NO_INTR_EP

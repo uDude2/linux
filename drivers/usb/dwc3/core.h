@@ -159,6 +159,7 @@
 #define DWC3_GCTL_PRTCAP_DEVICE	2
 #define DWC3_GCTL_PRTCAP_OTG	3
 
+#define DWC3_GCTL_CORESOFTRESET	(1 << 11)
 #define DWC3_GCTL_DISSCRAMBLE	(1 << 3)
 
 /* Global USB2 PHY Configuration Register */
@@ -359,6 +360,12 @@ struct dwc3_ep {
 	char			name[20];
 
 	unsigned		direction:1;
+};
+
+enum dwc3_phy {
+	DWC3_PHY_UNKNOWN = 0,
+	DWC3_PHY_USB3,
+	DWC3_PHY_USB2,
 };
 
 enum dwc3_ep0_state {

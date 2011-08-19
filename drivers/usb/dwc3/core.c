@@ -46,6 +46,7 @@
 #include <linux/ioport.h>
 #include <linux/io.h>
 #include <linux/list.h>
+#include <linux/delay.h>
 #include <linux/dma-mapping.h>
 
 #include <linux/usb/ch9.h>
@@ -56,6 +57,47 @@
 #include "io.h"
 
 #include "debug.h"
+
+/**
+ * dwc3_core_soft_reset - Issues core soft reset and PHY reset
+ * @dwc: pointer to our context structure
+ */
+static void dwc3_core_soft_reset(struct dwc3 *dwc)
+{
+	u32		reg;
+
+	/* Before Resetting PHY, put Core in Reset */
+	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+	reg |= DWC3_GCTL_CORESOFTRESET;
+	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+
+	/* Assert USB3 PHY reset */
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+	reg |= DWC3_GUSB3PIPECTL_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+
+	/* Assert USB2 PHY reset */
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+	reg |= DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+
+	mdelay(100);
+
+	/* Assert USB3 PHY reset */
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0));
+	reg &= ~DWC3_GUSB3PIPECTL_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB3PIPECTL(0), reg);
+
+	/* Assert USB2 PHY reset */
+	reg = dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0));
+	reg &= ~DWC3_GUSB2PHYCFG_PHYSOFTRST;
+	dwc3_writel(dwc->regs, DWC3_GUSB2PHYCFG(0), reg);
+
+	/* After PHYs are stable we can take Core out of reset state */
+	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
+	reg &= ~DWC3_GCTL_CORESOFTRESET;
+	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
+}
 
 /**
  * dwc3_free_one_event_buffer - Frees one event buffer
@@ -157,7 +199,7 @@ static int __devinit dwc3_event_buffers_setup(struct dwc3 *dwc)
 
 	for (n = 0; n < DWC3_EVENT_BUFFERS_NUM; n++) {
 		evt = dwc->ev_buffs[n];
-		dev_dbg(dwc->dev, "Event buf %p dma %llu length %d\n",
+		dev_dbg(dwc->dev, "Event buf %p dma %08llx length %d\n",
 				evt->buf, (unsigned long long) evt->dma,
 				evt->length);
 
@@ -195,23 +237,15 @@ static void dwc3_event_buffers_cleanup(struct dwc3 *dwc)
  */
 static int __devinit dwc3_core_init(struct dwc3 *dwc)
 {
-	unsigned long		timeout = jiffies + msecs_to_jiffies(500);
+	unsigned long		timeout;
 	u32			reg;
-
 	int			ret;
 
-	reg = dwc3_readl(dwc->regs, DWC3_GSNPSID);
-	/* This should read as U3 followed by revision number */
-	if ((reg & DWC3_GSNPSID_MASK) != 0x55330000) {
-		dev_err(dwc->dev, "this is not a DesignWare USB3 DRD Core\n");
-		ret = -ENODEV;
-		goto err0;
-	}
+	dwc3_core_soft_reset(dwc);
 
-	dwc->revision = reg & DWC3_GSNPSREV_MASK;
-
+	/* issue device SoftReset too */
+	timeout = jiffies + msecs_to_jiffies(500);
 	dwc3_writel(dwc->regs, DWC3_DCTL, DWC3_DCTL_CSFTRST);
-
 	do {
 		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 		if (!(reg & DWC3_DCTL_CSFTRST))
@@ -225,6 +259,16 @@ static int __devinit dwc3_core_init(struct dwc3 *dwc)
 
 		cpu_relax();
 	} while (true);
+
+	reg = dwc3_readl(dwc->regs, DWC3_GSNPSID);
+	/* This should read as U3 followed by revision number */
+	if ((reg & DWC3_GSNPSID_MASK) != 0x55330000) {
+		dev_err(dwc->dev, "this is not a DesignWare USB3 DRD Core\n");
+		ret = -ENODEV;
+		goto err0;
+	}
+
+	dwc->revision = reg & DWC3_GSNPSREV_MASK;
 
 	ret = dwc3_alloc_event_buffers(dwc, DWC3_EVENT_BUFFERS_NUM,
 			DWC3_EVENT_BUFFERS_SIZE);
@@ -364,7 +408,7 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 	struct resource	*res;
 	unsigned int	features = id->driver_data;
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, 0);
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	pm_runtime_put(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
