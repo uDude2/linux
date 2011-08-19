@@ -445,7 +445,6 @@ struct fsg_dev {
 
 	struct fsg_buffhd	*next_buffhd_to_fill;
 	struct fsg_buffhd	*next_buffhd_to_drain;
-	struct fsg_buffhd	buffhds[FSG_NUM_BUFFERS];
 
 	int			thread_wakeup_needed;
 	struct completion	thread_notifier;
@@ -472,6 +471,8 @@ struct fsg_dev {
 	unsigned int		nluns;
 	struct fsg_lun		*luns;
 	struct fsg_lun		*curlun;
+	/* Must be the last entry */
+	struct fsg_buffhd	buffhds[];
 };
 
 typedef void (*fsg_routine_t)(struct fsg_dev *);
@@ -2722,7 +2723,7 @@ static int do_set_interface(struct fsg_dev *fsg, int altsetting)
 
 reset:
 	/* Deallocate the requests */
-	for (i = 0; i < FSG_NUM_BUFFERS; ++i) {
+	for (i = 0; i < fsg_num_buffers; ++i) {
 		struct fsg_buffhd *bh = &fsg->buffhds[i];
 
 		if (bh->inreq) {
@@ -2783,7 +2784,7 @@ reset:
 	}
 
 	/* Allocate the requests */
-	for (i = 0; i < FSG_NUM_BUFFERS; ++i) {
+	for (i = 0; i < fsg_num_buffers; ++i) {
 		struct fsg_buffhd	*bh = &fsg->buffhds[i];
 
 		if ((rc = alloc_request(fsg, fsg->bulk_in, &bh->inreq)) != 0)
@@ -2879,7 +2880,7 @@ static void handle_exception(struct fsg_dev *fsg)
 	/* Cancel all the pending transfers */
 	if (fsg->intreq_busy)
 		usb_ep_dequeue(fsg->intr_in, fsg->intreq);
-	for (i = 0; i < FSG_NUM_BUFFERS; ++i) {
+	for (i = 0; i < fsg_num_buffers; ++i) {
 		bh = &fsg->buffhds[i];
 		if (bh->inreq_busy)
 			usb_ep_dequeue(fsg->bulk_in, bh->inreq);
@@ -2890,7 +2891,7 @@ static void handle_exception(struct fsg_dev *fsg)
 	/* Wait until everything is idle */
 	for (;;) {
 		num_active = fsg->intreq_busy;
-		for (i = 0; i < FSG_NUM_BUFFERS; ++i) {
+		for (i = 0; i < fsg_num_buffers; ++i) {
 			bh = &fsg->buffhds[i];
 			num_active += bh->inreq_busy + bh->outreq_busy;
 		}
@@ -2912,7 +2913,7 @@ static void handle_exception(struct fsg_dev *fsg)
 	 * state, and the exception.  Then invoke the handler. */
 	spin_lock_irq(&fsg->lock);
 
-	for (i = 0; i < FSG_NUM_BUFFERS; ++i) {
+	for (i = 0; i < fsg_num_buffers; ++i) {
 		bh = &fsg->buffhds[i];
 		bh->state = BUF_STATE_EMPTY;
 	}
@@ -3142,7 +3143,7 @@ static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
 	}
 
 	/* Free the data buffers */
-	for (i = 0; i < FSG_NUM_BUFFERS; ++i)
+	for (i = 0; i < fsg_num_buffers; ++i)
 		kfree(fsg->buffhds[i].buf);
 
 	/* Free the request and buffer for endpoint 0 */
@@ -3430,7 +3431,7 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 	req->complete = ep0_complete;
 
 	/* Allocate the data buffers */
-	for (i = 0; i < FSG_NUM_BUFFERS; ++i) {
+	for (i = 0; i < fsg_num_buffers; ++i) {
 		struct fsg_buffhd	*bh = &fsg->buffhds[i];
 
 		/* Allocate for the bulk-in endpoint.  We assume that
@@ -3441,7 +3442,7 @@ static int __init fsg_bind(struct usb_gadget *gadget)
 			goto out;
 		bh->next = bh + 1;
 	}
-	fsg->buffhds[FSG_NUM_BUFFERS - 1].next = &fsg->buffhds[0];
+	fsg->buffhds[fsg_num_buffers - 1].next = &fsg->buffhds[0];
 
 	/* This should reflect the actual gadget power source */
 	usb_gadget_set_selfpowered(gadget);
@@ -3557,7 +3558,9 @@ static int __init fsg_alloc(void)
 {
 	struct fsg_dev		*fsg;
 
-	fsg = kzalloc(sizeof *fsg, GFP_KERNEL);
+	fsg = kzalloc(sizeof *fsg +
+		      fsg_num_buffers * sizeof *(fsg->buffhds), GFP_KERNEL);
+
 	if (!fsg)
 		return -ENOMEM;
 	spin_lock_init(&fsg->lock);
@@ -3574,6 +3577,10 @@ static int __init fsg_init(void)
 {
 	int		rc;
 	struct fsg_dev	*fsg;
+
+	rc = fsg_num_buffers_validate();
+	if (rc != 0)
+		return rc;
 
 	if ((rc = fsg_alloc()) != 0)
 		return rc;
