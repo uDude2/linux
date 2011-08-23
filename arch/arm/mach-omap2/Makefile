@@ -262,6 +262,7 @@ obj-y					+= omap_phy_internal.o
 ifneq ($(CONFIG_USB_DWC3),)
 obj-y					+= usb-dwc3.o
 endif
+
 obj-$(CONFIG_MACH_OMAP2_TUSB6010)	+= usb-tusb6010.o
 obj-y					+= usb-host.o
 
