@@ -55,8 +55,6 @@ struct ux500_dma_controller {
 	dma_addr_t phy_base;
 };
 
-	dev_dbg(musb->controller, "DMA tx transfer done on hw_ep=%d\n",
-		hw_ep->epnum);
 /* Work function invoked from DMA callback to handle rx transfers. */
 void ux500_dma_callback(void *private_data)
 {

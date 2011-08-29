@@ -1493,7 +1493,7 @@ static irqreturn_t generic_interrupt(int irq, void *__hci)
 	musb->int_rx = musb_readw(musb->mregs, MUSB_INTRRX);
 
 	if (musb->int_usb || musb->int_tx || musb->int_rx)
-		retval = IRQ_WAKE_THREAD;
+		retval = musb_interrupt(musb);
 
 	spin_unlock_irqrestore(&musb->lock, flags);
 
@@ -1511,16 +1511,12 @@ static irqreturn_t generic_interrupt(int irq, void *__hci)
  *
  * called in irq context with spinlock held, irqs blocked
  */
-static irqreturn_t musb_interrupt(int irq, void *_musb)
+irqreturn_t musb_interrupt(struct musb *musb)
 {
-	struct musb	*musb = _musb;
 	irqreturn_t	retval = IRQ_NONE;
-	unsigned long	flags;
 	u8		devctl, power;
 	int		ep_num;
 	u32		reg;
-
-	spin_lock_irqsave(&musb->lock, flags);
 
 	devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
 	power = musb_readb(musb->mregs, MUSB_POWER);
@@ -1587,10 +1583,9 @@ static irqreturn_t musb_interrupt(int irq, void *_musb)
 		ep_num++;
 	}
 
-	spin_unlock_irqrestore(&musb->lock, flags);
-
 	return retval;
 }
+EXPORT_SYMBOL_GPL(musb_interrupt);
 
 #ifndef CONFIG_MUSB_PIO_ONLY
 static int __initdata use_dma = 1;
@@ -1948,8 +1943,7 @@ musb_init_controller(struct device *dev, int nIrq, void __iomem *ctrl)
 	INIT_WORK(&musb->irq_work, musb_irq_work);
 
 	/* attach to the IRQ */
-	if (request_threaded_irq(nIrq, musb->isr, musb_interrupt,
-				0, dev_name(dev), musb)) {
+	if (request_irq(nIrq, musb->isr, 0, dev_name(dev), musb)) {
 		dev_err(dev, "request_irq %d failed!\n", nIrq);
 		status = -ENODEV;
 		goto fail3;

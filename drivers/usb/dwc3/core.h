@@ -350,6 +350,9 @@ struct dwc3_ep {
 #define DWC3_EP_PENDING_REQUEST	(1 << 5)
 #define DWC3_EP_WILL_SHUTDOWN	(1 << 6)
 
+	/* This last one is specific to EP0 */
+#define DWC3_EP0_DIR_IN		(1 << 31)
+
 	unsigned		current_trb;
 
 	u8			number;
@@ -370,15 +373,9 @@ enum dwc3_phy {
 
 enum dwc3_ep0_state {
 	EP0_UNCONNECTED		= 0,
-	EP0_IDLE,
-	EP0_IN_DATA_PHASE,
-	EP0_OUT_DATA_PHASE,
-	EP0_IN_WAIT_GADGET,
-	EP0_OUT_WAIT_GADGET,
-	EP0_IN_WAIT_NRDY,
-	EP0_OUT_WAIT_NRDY,
-	EP0_IN_STATUS_PHASE,
-	EP0_OUT_STATUS_PHASE,
+	EP0_SETUP_PHASE,
+	EP0_DATA_PHASE,
+	EP0_STATUS_PHASE,
 	EP0_STALL,
 };
 
@@ -503,13 +500,15 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
 
 /**
  * struct dwc3 - representation of our controller
- * ctrl_req: usb control request which is used for ep0
- * ep0_trb: trb which is used for the ctrl_req
- * setup_buf: used while precessing STD USB requests
- * ctrl_req_addr: dma address of ctrl_req
- * ep0_trb: dma address of ep0_trb
- * ep0_usb_req: dummy req used while handling STD USB requests
- * setup_buf_addr: dma address of setup_buf
+ * @ctrl_req: usb control request which is used for ep0
+ * @ep0_trb: trb which is used for the ctrl_req
+ * @ep0_bounce: bounce buffer for ep0
+ * @setup_buf: used while precessing STD USB requests
+ * @ctrl_req_addr: dma address of ctrl_req
+ * @ep0_trb: dma address of ep0_trb
+ * @ep0_usb_req: dummy req used while handling STD USB requests
+ * @setup_buf_addr: dma address of setup_buf
+ * @ep0_bounce_addr: dma address of ep0_bounce
  * @lock: for synchronizing
  * @dev: pointer to our struct device
  * @event_buffer_list: a list of event buffers
@@ -522,6 +521,7 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
  * @is_selfpowered: true when we are selfpowered
  * @three_stage_setup: set if we perform a three phase setup
  * @ep0_status_pending: ep0 status response without a req is pending
+ * @ep0_bounced: true when we used bounce buffer
  * @ep0state: state of endpoint zero
  * @link_state: link state
  * @speed: device speed (super, high, full, low)
@@ -531,10 +531,12 @@ static inline void dwc3_trb_to_nat(struct dwc3_trb_hw *hw, struct dwc3_trb *nat)
 struct dwc3 {
 	struct usb_ctrlrequest	*ctrl_req;
 	struct dwc3_trb_hw	*ep0_trb;
+	void			*ep0_bounce;
 	u8			*setup_buf;
 	dma_addr_t		ctrl_req_addr;
 	dma_addr_t		ep0_trb_addr;
 	dma_addr_t		setup_buf_addr;
+	dma_addr_t		ep0_bounce_addr;
 	struct usb_request	ep0_usb_req;
 	/* device lock */
 	spinlock_t		lock;
@@ -564,6 +566,7 @@ struct dwc3 {
 	unsigned		is_selfpowered:1;
 	unsigned		three_stage_setup:1;
 	unsigned		ep0_status_pending:1;
+	unsigned		ep0_bounced:1;
 
 	enum dwc3_ep0_state	ep0state;
 	enum dwc3_link_state	link_state;
@@ -634,6 +637,12 @@ struct dwc3_event_depevt {
 #define DEPEVT_STATUS_SHORT     (1 << 1)
 #define DEPEVT_STATUS_IOC       (1 << 2)
 #define DEPEVT_STATUS_LST	(1 << 3)
+
+/* Control-only Status */
+#define DEPEVT_STATUS_CONTROL_SETUP	0
+#define DEPEVT_STATUS_CONTROL_DATA	1
+#define DEPEVT_STATUS_CONTROL_STATUS	2
+
 	u32	parameters:16;
 } __packed;
 
