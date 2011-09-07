@@ -2159,6 +2159,7 @@ static void musb_save_context(struct musb *musb)
 		if (!epio)
 			continue;
 
+		musb_writeb(musb_base, MUSB_INDEX, i);
 		musb->context.index_regs[i].txmaxp =
 			musb_readw(epio, MUSB_TXMAXP);
 		musb->context.index_regs[i].txcsr =
@@ -2234,6 +2235,7 @@ static void musb_restore_context(struct musb *musb)
 		if (!epio)
 			continue;
 
+		musb_writeb(musb_base, MUSB_INDEX, i);
 		musb_writew(epio, MUSB_TXMAXP,
 			musb->context.index_regs[i].txmaxp);
 		musb_writew(epio, MUSB_TXCSR,
