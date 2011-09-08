@@ -545,6 +545,8 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 		dwc->ep0_next_event = DWC3_EP0_NRDY_DATA;
 	}
 
+	dwc->ep0_expect_in = !!(ctrl->bRequestType & USB_DIR_IN);
+
 	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD)
 		ret = dwc3_ep0_std_request(dwc, ctrl);
 	else
