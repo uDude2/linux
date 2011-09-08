@@ -147,7 +147,7 @@
 
 /* Global Configuration Register */
 #define DWC3_GCTL_PWRDNSCALE(n)	(n << 19)
-#define DWC3_GCTL_U2RSTECN	16
+#define DWC3_GCTL_U2RSTECN	(1 << 16)
 #define DWC3_GCTL_RAMCLKSEL(x)	((x & DWC3_GCTL_CLK_MASK) << 6)
 #define DWC3_GCTL_CLK_BUS	(0)
 #define DWC3_GCTL_CLK_PIPE	(1)
@@ -160,6 +160,7 @@
 #define DWC3_GCTL_PRTCAP_OTG	3
 
 #define DWC3_GCTL_CORESOFTRESET	(1 << 11)
+#define DWC3_GCTL_SCALEDOWN(n)	(n << 4)
 #define DWC3_GCTL_DISSCRAMBLE	(1 << 3)
 
 /* Global USB2 PHY Configuration Register */

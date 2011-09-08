@@ -71,11 +71,6 @@ void dwc3_map_buffer_to_dma(struct dwc3_request *req)
 				req->request.length, req->direction
 				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 		req->mapped = true;
-	} else {
-		dma_sync_single_for_device(dwc->dev, req->request.dma,
-				req->request.length, req->direction
-				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
-		req->mapped = false;
 	}
 }
 
@@ -94,10 +89,6 @@ void dwc3_unmap_buffer_from_dma(struct dwc3_request *req)
 				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 		req->mapped = 0;
 		req->request.dma = DMA_ADDR_INVALID;
-	} else {
-		dma_sync_single_for_cpu(dwc->dev, req->request.dma,
-				req->request.length, req->direction
-				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 	}
 }
 
@@ -1150,13 +1141,10 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 
 	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
 
-	/*
-	 * REVISIT: power down scale might be different
-	 * depending on PHY used, need to pass that via platform_data
-	 */
-	reg |= DWC3_GCTL_PWRDNSCALE(0x61a)
-		| DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
+	reg &= ~DWC3_GCTL_SCALEDOWN(3);
+	reg &= ~DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_OTG);
 	reg &= ~DWC3_GCTL_DISSCRAMBLE;
+	reg |= DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
 
 	/*
 	 * WORKAROUND: DWC3 revisions <1.90a have a bug
