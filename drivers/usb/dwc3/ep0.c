@@ -2,7 +2,6 @@
  * ep0.c - DesignWare USB3 DRD Controller Endpoint 0 Handling
  *
  * Copyright (C) 2010-2011 Texas Instruments Incorporated - http://www.ti.com
- * All rights reserved.
  *
  * Authors: Felipe Balbi <balbi@ti.com>,
  *	    Sebastian Andrzej Siewior <bigeasy@linutronix.de>
@@ -421,7 +420,6 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 
 static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 {
-	int ret = 0;
 	u32 addr;
 	u32 reg;
 
@@ -429,29 +427,17 @@ static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 	if (addr > 127)
 		return -EINVAL;
 
-	switch (dwc->dev_state) {
-	case DWC3_DEFAULT_STATE:
-	case DWC3_ADDRESS_STATE:
-		/*
-		 * Not sure if we should program DevAddr now or later
-		 */
-		reg = dwc3_readl(dwc->regs, DWC3_DCFG);
-		reg &= ~(DWC3_DCFG_DEVADDR_MASK);
-		reg |= DWC3_DCFG_DEVADDR(addr);
-		dwc3_writel(dwc->regs, DWC3_DCFG, reg);
+	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
+	reg &= ~(DWC3_DCFG_DEVADDR_MASK);
+	reg |= DWC3_DCFG_DEVADDR(addr);
+	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
-		if (addr)
-			dwc->dev_state = DWC3_ADDRESS_STATE;
-		else
-			dwc->dev_state = DWC3_DEFAULT_STATE;
-		break;
+	if (addr)
+		dwc->dev_state = DWC3_ADDRESS_STATE;
+	else
+		dwc->dev_state = DWC3_DEFAULT_STATE;
 
-	case DWC3_CONFIGURED_STATE:
-		ret = -EINVAL;
-		break;
-	}
-
-	return ret;
+	return 0;
 }
 
 static int dwc3_ep0_delegate_req(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
@@ -538,14 +524,14 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 
 	len = le16_to_cpu(ctrl->wLength);
 	if (!len) {
-		dwc->three_stage_setup = 0;
+		dwc->three_stage_setup = false;
+		dwc->ep0_expect_in = false;
 		dwc->ep0_next_event = DWC3_EP0_NRDY_STATUS;
 	} else {
-		dwc->three_stage_setup = 1;
+		dwc->three_stage_setup = true;
+		dwc->ep0_expect_in = !!(ctrl->bRequestType & USB_DIR_IN);
 		dwc->ep0_next_event = DWC3_EP0_NRDY_DATA;
 	}
-
-	dwc->ep0_expect_in = !!(ctrl->bRequestType & USB_DIR_IN);
 
 	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD)
 		ret = dwc3_ep0_std_request(dwc, ctrl);
@@ -600,7 +586,6 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 		/* for some reason we did not get everything out */
 
 		dwc3_ep0_stall_and_restart(dwc);
-		dwc3_gadget_giveback(dep, r, -ECONNRESET);
 	} else {
 		/*
 		 * handle the case where we have to send a zero packet. This
@@ -753,8 +738,8 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 
 		if (dwc->ep0_next_event != DWC3_EP0_NRDY_DATA) {
 			dev_vdbg(dwc->dev, "Expected %d got %d\n",
-					DEPEVT_STATUS_CONTROL_DATA,
-					event->status);
+					dwc->ep0_next_event,
+					DWC3_EP0_NRDY_DATA);
 
 			dwc3_ep0_stall_and_restart(dwc);
 			return;
@@ -782,8 +767,8 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 
 		if (dwc->ep0_next_event != DWC3_EP0_NRDY_STATUS) {
 			dev_vdbg(dwc->dev, "Expected %d got %d\n",
-					DEPEVT_STATUS_CONTROL_STATUS,
-					event->status);
+					dwc->ep0_next_event,
+					DWC3_EP0_NRDY_STATUS);
 
 			dwc3_ep0_stall_and_restart(dwc);
 			return;
@@ -799,7 +784,7 @@ void dwc3_ep0_interrupt(struct dwc3 *dwc,
 
 	dev_dbg(dwc->dev, "%s while ep%d%s in state '%s'\n",
 			dwc3_ep_event_string(event->endpoint_event),
-			epnum, (epnum & 1) ? "in" : "out",
+			epnum >> 1, (epnum & 1) ? "in" : "out",
 			dwc3_ep0_state_string(dwc->ep0state));
 
 	switch (event->endpoint_event) {
