@@ -189,7 +189,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 static dma_addr_t dwc3_trb_dma_offset(struct dwc3_ep *dep,
 		struct dwc3_trb_hw *trb)
 {
-	u32		offset = trb - dep->trb_pool;
+	u32	offset = (char *)trb - (char *)dep->trb_pool;
 
 	return dep->trb_pool_dma + offset;
 }
@@ -237,8 +237,12 @@ static int dwc3_gadget_start_config(struct dwc3 *dwc, struct dwc3_ep *dep)
 	if (dep->number != 1) {
 		cmd = DWC3_DEPCMD_DEPSTARTCFG;
 		/* XferRscIdx == 0 for ep0 and 2 for the remaining */
-		if (dep->number > 1)
+		if (dep->number > 1) {
+			if (dwc->start_config_issued)
+				return 0;
+			dwc->start_config_issued = true;
 			cmd |= DWC3_DEPCMD_PARAM(2);
+		}
 
 		return dwc3_send_gadget_ep_cmd(dwc, 0, cmd, &params);
 	}
@@ -255,6 +259,7 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 
 	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
 	params.param0.depcfg.max_packet_size = usb_endpoint_maxp(desc);
+	params.param0.depcfg.burst_size = dep->endpoint.maxburst;
 
 	params.param1.depcfg.xfer_complete_enable = true;
 	params.param1.depcfg.xfer_not_ready_enable = true;
@@ -890,6 +895,9 @@ int __dwc3_gadget_ep_set_halt(struct dwc3_ep *dep, int value)
 		else
 			dep->flags |= DWC3_EP_STALL;
 	} else {
+		if (dep->flags & DWC3_EP_WEDGE)
+			return 0;
+
 		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_CLEARSTALL, &params);
 		if (ret)
@@ -899,6 +907,7 @@ int __dwc3_gadget_ep_set_halt(struct dwc3_ep *dep, int value)
 		else
 			dep->flags &= ~DWC3_EP_STALL;
 	}
+
 	return ret;
 }
 
@@ -932,7 +941,7 @@ static int dwc3_gadget_ep_set_wedge(struct usb_ep *ep)
 
 	dep->flags |= DWC3_EP_WEDGE;
 
-	return usb_ep_set_halt(ep);
+	return dwc3_gadget_ep_set_halt(ep, 1);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1160,6 +1169,8 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 	reg &= ~(DWC3_DCFG_SPEED_MASK);
 	reg |= DWC3_DCFG_SUPERSPEED;
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
+
+	dwc->start_config_issued = false;
 
 	/* Start with SuperSpeed Default */
 	dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
@@ -1592,6 +1603,7 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 
 	dwc3_stop_active_transfers(dwc);
 	dwc3_disconnect_gadget(dwc);
+	dwc->start_config_issued = false;
 
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
 }
@@ -1643,30 +1655,12 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 
 	dwc3_stop_active_transfers(dwc);
 	dwc3_clear_stall_all_ep(dwc);
+	dwc->start_config_issued = false;
 
 	/* Reset device address to zero */
 	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
 	reg &= ~(DWC3_DCFG_DEVADDR_MASK);
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
-
-	/*
-	 * Wait for RxFifo to drain
-	 *
-	 * REVISIT probably shouldn't wait forever.
-	 * In case Hardware ends up in a screwed up
-	 * case, we error out, notify the user and,
-	 * maybe, WARN() or BUG() but leave the rest
-	 * of the kernel working fine.
-	 *
-	 * REVISIT the below is rather CPU intensive,
-	 * maybe we should read and if it doesn't work
-	 * sleep (not busy wait) for a few useconds.
-	 *
-	 * REVISIT why wait until the RXFIFO is empty anyway?
-	 */
-	while (!(dwc3_readl(dwc->regs, DWC3_DSTS)
-				& DWC3_DSTS_RXFIFOEMPTY))
-		cpu_relax();
 }
 
 static void dwc3_update_ram_clk_sel(struct dwc3 *dwc, u32 speed)
