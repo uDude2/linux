@@ -115,7 +115,6 @@ int usb_gadget_config_buf(
 	cp->bmAttributes |= USB_CONFIG_ATT_ONE;
 	return len;
 }
-EXPORT_SYMBOL_GPL(usb_gadget_config_buf);
 
 /**
  * usb_copy_descriptors - copy a vector of USB descriptors
@@ -165,4 +164,4 @@ usb_copy_descriptors(struct usb_descriptor_header **src)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(usb_copy_descriptors);
+

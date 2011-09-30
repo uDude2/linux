@@ -32,9 +32,6 @@ mv_udc-y			:= mv_udc_core.o mv_udc_phy.o
 obj-$(CONFIG_USB_CI13XXX_MSM)	+= ci13xxx_msm.o
 obj-$(CONFIG_USB_FUSB300)	+= fusb300_udc.o
 
-usb-composite-y			:= composite.o usbstring.o config.o epautoconf.o
-obj-$(CONFIG_USB_COMPOSITE)	+= usb-composite.o
-
 #
 # USB gadget drivers
 #

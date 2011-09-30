@@ -32,6 +32,11 @@
  * a "gcc --combine ... part1.c part2.c part3.c ... " build would.
  */
 
+#include "composite.c"
+#include "usbstring.c"
+#include "config.c"
+#include "epautoconf.c"
+
 #if defined CONFIG_USB_FUNCTIONFS_ETH || defined CONFIG_USB_FUNCTIONFS_RNDIS
 #  if defined USB_ETH_RNDIS
 #    undef USB_ETH_RNDIS

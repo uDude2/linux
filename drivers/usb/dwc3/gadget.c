@@ -158,12 +158,12 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 
 	dev_vdbg(dwc->dev, "%s: cmd '%s' params %08x %08x %08x\n",
 			dep->name,
-			dwc3_gadget_ep_cmd_string(cmd), params->param0.raw,
-			params->param1.raw, params->param2.raw);
+			dwc3_gadget_ep_cmd_string(cmd), params->param0,
+			params->param1, params->param2);
 
-	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR0(ep), params->param0.raw);
-	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR1(ep), params->param1.raw);
-	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR2(ep), params->param2.raw);
+	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR0(ep), params->param0);
+	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR1(ep), params->param1);
+	dwc3_writel(dwc->regs, DWC3_DEPCMDPAR2(ep), params->param2);
 
 	dwc3_writel(dwc->regs, DWC3_DEPCMD(ep), cmd | DWC3_DEPCMD_CMDACT);
 	do {
@@ -189,7 +189,7 @@ int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 static dma_addr_t dwc3_trb_dma_offset(struct dwc3_ep *dep,
 		struct dwc3_trb_hw *trb)
 {
-	u32	offset = (char *)trb - (char *)dep->trb_pool;
+	u32		offset = (char *) trb - (char *) dep->trb_pool;
 
 	return dep->trb_pool_dma + offset;
 }
@@ -257,15 +257,21 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 
 	memset(&params, 0x00, sizeof(params));
 
-	params.param0.depcfg.ep_type = usb_endpoint_type(desc);
-	params.param0.depcfg.max_packet_size = usb_endpoint_maxp(desc);
-	params.param0.depcfg.burst_size = dep->endpoint.maxburst;
+	params.param0 = DWC3_DEPCFG_EP_TYPE(usb_endpoint_type(desc))
+		| DWC3_DEPCFG_MAX_PACKET_SIZE(usb_endpoint_maxp(desc))
+		| DWC3_DEPCFG_BURST_SIZE(dep->endpoint.maxburst);
 
-	params.param1.depcfg.xfer_complete_enable = true;
-	params.param1.depcfg.xfer_not_ready_enable = true;
+	params.param1 = DWC3_DEPCFG_XFER_COMPLETE_EN
+		| DWC3_DEPCFG_XFER_NOT_READY_EN;
+
+	if (usb_endpoint_xfer_bulk(desc) && dep->endpoint.max_streams) {
+		params.param1 |= DWC3_DEPCFG_STREAM_CAPABLE
+			| DWC3_DEPCFG_STREAM_EVENT_EN;
+		dep->stream_capable = true;
+	}
 
 	if (usb_endpoint_xfer_isoc(desc))
-		params.param1.depcfg.xfer_in_progress_enable = true;
+		params.param1 |= DWC3_DEPCFG_XFER_IN_PROGRESS_EN;
 
 	/*
 	 * We are doing 1:1 mapping for endpoints, meaning
@@ -273,17 +279,17 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 	 * so on. We consider the direction bit as part of the physical
 	 * endpoint number. So USB endpoint 0x81 is 0x03.
 	 */
-	params.param1.depcfg.ep_number = dep->number;
+	params.param1 |= DWC3_DEPCFG_EP_NUMBER(dep->number);
 
 	/*
 	 * We must use the lower 16 TX FIFOs even though
 	 * HW might have more
 	 */
 	if (dep->direction)
-		params.param0.depcfg.fifo_number = dep->number >> 1;
+		params.param0 |= DWC3_DEPCFG_FIFO_NUMBER(dep->number >> 1);
 
 	if (desc->bInterval) {
-		params.param1.depcfg.binterval_m1 = desc->bInterval - 1;
+		params.param1 |= DWC3_DEPCFG_BINTERVAL_M1(desc->bInterval - 1);
 		dep->interval = 1 << (desc->bInterval - 1);
 	}
 
@@ -297,7 +303,7 @@ static int dwc3_gadget_set_xfer_resource(struct dwc3 *dwc, struct dwc3_ep *dep)
 
 	memset(&params, 0x00, sizeof(params));
 
-	params.param0.depxfercfg.number_xfer_resources = 1;
+	params.param0 = DWC3_DEPXFERCFG_NUM_XFER_RES(1);
 
 	return dwc3_send_gadget_ep_cmd(dwc, dep->number,
 			DWC3_DEPCMD_SETTRANSFRESOURCE, &params);
@@ -391,15 +397,16 @@ static int __dwc3_gadget_ep_disable(struct dwc3_ep *dep)
 	struct dwc3		*dwc = dep->dwc;
 	u32			reg;
 
-	dep->flags &= ~DWC3_EP_ENABLED;
 	dwc3_remove_requests(dwc, dep);
 
 	reg = dwc3_readl(dwc->regs, DWC3_DALEPENA);
 	reg &= ~DWC3_DALEPENA_EP(dep->number);
 	dwc3_writel(dwc->regs, DWC3_DALEPENA, reg);
 
+	dep->stream_capable = false;
 	dep->desc = NULL;
 	dep->type = 0;
+	dep->flags = 0;
 
 	return 0;
 }
@@ -633,6 +640,9 @@ static struct dwc3_request *dwc3_prepare_trbs(struct dwc3_ep *dep,
 			trb.lst = last_one;
 		}
 
+		if (usb_endpoint_xfer_bulk(dep->desc) && dep->stream_capable)
+			trb.sid_sofn = req->request.stream_id;
+
 		switch (usb_endpoint_type(dep->desc)) {
 		case USB_ENDPOINT_XFER_CONTROL:
 			trb.trbctl = DWC3_TRBCTL_CONTROL_SETUP;
@@ -709,10 +719,8 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 	}
 
 	memset(&params, 0, sizeof(params));
-	params.param0.depstrtxfer.transfer_desc_addr_high =
-		upper_32_bits(req->trb_dma);
-	params.param1.depstrtxfer.transfer_desc_addr_low =
-		lower_32_bits(req->trb_dma);
+	params.param0 = upper_32_bits(req->trb_dma);
+	params.param1 = lower_32_bits(req->trb_dma);
 
 	if (start_new)
 		cmd = DWC3_DEPCMD_STARTTRANSFER;
@@ -1154,6 +1162,14 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 	reg &= ~DWC3_GCTL_DISSCRAMBLE;
 	reg |= DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
 
+	switch (DWC3_GHWPARAMS1_EN_PWROPT(dwc->hwparams.hwparams0)) {
+	case DWC3_GHWPARAMS1_EN_PWROPT_CLK:
+		reg &= ~DWC3_GCTL_DSBLCLKGTNG;
+		break;
+	default:
+		dev_dbg(dwc->dev, "No power optimization available\n");
+	}
+
 	/*
 	 * WORKAROUND: DWC3 revisions <1.90a have a bug
 	 * when The device fails to connect at SuperSpeed
@@ -1505,11 +1521,27 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		}
 
 		break;
+	case DWC3_DEPEVT_STREAMEVT:
+		if (!usb_endpoint_xfer_bulk(dep->desc)) {
+			dev_err(dwc->dev, "Stream event for non-Bulk %s\n",
+					dep->name);
+			return;
+		}
+
+		switch (event->status) {
+		case DEPEVT_STREAMEVT_FOUND:
+			dev_vdbg(dwc->dev, "Stream %d found and started\n",
+					event->parameters);
+
+			break;
+		case DEPEVT_STREAMEVT_NOTFOUND:
+			/* FALLTHROUGH */
+		default:
+			dev_dbg(dwc->dev, "Couldn't find suitable stream\n");
+		}
+		break;
 	case DWC3_DEPEVT_RXTXFIFOEVT:
 		dev_dbg(dwc->dev, "%s FIFO Overrun\n", dep->name);
-		break;
-	case DWC3_DEPEVT_STREAMEVT:
-		dev_dbg(dwc->dev, "%s Stream Event\n", dep->name);
 		break;
 	case DWC3_DEPEVT_EPCMDCMPLT:
 		dwc3_ep_cmd_compl(dep, event);

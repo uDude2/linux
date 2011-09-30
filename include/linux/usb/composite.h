@@ -369,8 +369,6 @@ extern int usb_string_ids_tab(struct usb_composite_dev *c,
 			      struct usb_string *str);
 extern int usb_string_ids_n(struct usb_composite_dev *c, unsigned n);
 
-/* big enough to hold our biggest descriptor */
-#define USB_BUFSIZ		1024
 
 /* messaging utils */
 #define DBG(d, fmt, args...) \

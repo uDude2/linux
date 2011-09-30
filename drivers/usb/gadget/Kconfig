@@ -43,10 +43,6 @@ menuconfig USB_GADGET
 
 if USB_GADGET
 
-config USB_COMPOSITE
-	tristate
-	default USB_GADGET
-
 config USB_GADGET_DEBUG
 	boolean "Debugging messages (DEVELOPMENT)"
 	depends on DEBUG_KERNEL
