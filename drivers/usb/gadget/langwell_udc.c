@@ -1561,7 +1561,7 @@ static void stop_activity(struct langwell_udc *dev,
 static ssize_t show_function(struct device *_dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = dev_get_drvdata(_dev);
 
 	if (!dev->driver || !dev->driver->function
 			|| strlen(dev->driver->function) > PAGE_SIZE)
@@ -1590,7 +1590,7 @@ static inline enum usb_device_speed lpm_device_speed(u32 reg)
 static ssize_t show_langwell_udc(struct device *_dev,
 		struct device_attribute *attr, char *buf)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = dev_get_drvdata(_dev);
 	struct langwell_request *req;
 	struct langwell_ep	*ep = NULL;
 	char			*next;
@@ -1822,7 +1822,7 @@ static DEVICE_ATTR(langwell_udc, S_IRUGO, show_langwell_udc, NULL);
 static ssize_t store_remote_wakeup(struct device *_dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = dev_get_drvdata(_dev);
 	unsigned long		flags;
 	ssize_t			rc = count;
 
@@ -2983,7 +2983,7 @@ static irqreturn_t langwell_irq(int irq, void *_dev)
 /* release device structure */
 static void gadget_release(struct device *_dev)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = dev_get_drvdata(_dev);
 
 	dev_dbg(&dev->pdev->dev, "---> %s()\n", __func__);
 
@@ -3041,7 +3041,7 @@ static void sram_deinit(struct langwell_udc *dev)
 /* tear down the binding between this driver and the pci device */
 static void langwell_udc_remove(struct pci_dev *pdev)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = pci_get_drvdata(pdev);
 
 	DECLARE_COMPLETION(done);
 
@@ -3388,7 +3388,7 @@ error:
 /* device controller suspend */
 static int langwell_udc_suspend(struct pci_dev *pdev, pm_message_t state)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = pci_get_drvdata(pdev);
 
 	dev_dbg(&dev->pdev->dev, "---> %s()\n", __func__);
 
@@ -3436,7 +3436,7 @@ static int langwell_udc_suspend(struct pci_dev *pdev, pm_message_t state)
 /* device controller resume */
 static int langwell_udc_resume(struct pci_dev *pdev)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = pci_get_drvdata(pdev);
 	size_t			size;
 
 	dev_dbg(&dev->pdev->dev, "---> %s()\n", __func__);
@@ -3518,7 +3518,7 @@ static int langwell_udc_resume(struct pci_dev *pdev)
 /* pci driver shutdown */
 static void langwell_udc_shutdown(struct pci_dev *pdev)
 {
-	struct langwell_udc	*dev = the_controller;
+	struct langwell_udc	*dev = pci_get_drvdata(pdev);
 	u32			usbmode;
 
 	dev_dbg(&dev->pdev->dev, "---> %s()\n", __func__);
