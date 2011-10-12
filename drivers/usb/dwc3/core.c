@@ -349,6 +349,8 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 		goto err1;
 	}
 
+	dwc->res = res;
+
 	res = request_mem_region(res->start, resource_size(res),
 			dev_name(&pdev->dev));
 	if (!res) {
@@ -400,8 +402,27 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 	mode = DWC3_MODE(dwc->hwparams.hwparams0);
 
 	switch (mode) {
-	case DWC3_MODE_DRD:
 	case DWC3_MODE_DEVICE:
+		ret = dwc3_gadget_init(dwc);
+		if (ret) {
+			dev_err(&pdev->dev, "failed to initialize gadget\n");
+			goto err4;
+		}
+		break;
+	case DWC3_MODE_HOST:
+		ret = dwc3_host_init(dwc);
+		if (ret) {
+			dev_err(&pdev->dev, "failed to initialize host\n");
+			goto err4;
+		}
+		break;
+	case DWC3_MODE_DRD:
+		ret = dwc3_host_init(dwc);
+		if (ret) {
+			dev_err(&pdev->dev, "failed to initialize host\n");
+			goto err4;
+		}
+
 		ret = dwc3_gadget_init(dwc);
 		if (ret) {
 			dev_err(&pdev->dev, "failed to initialize gadget\n");
@@ -426,8 +447,14 @@ static int __devinit dwc3_probe(struct platform_device *pdev)
 
 err5:
 	switch (mode) {
-	case DWC3_MODE_DRD:
 	case DWC3_MODE_DEVICE:
+		dwc3_gadget_exit(dwc);
+		break;
+	case DWC3_MODE_HOST:
+		dwc3_host_exit(dwc);
+		break;
+	case DWC3_MODE_DRD:
+		dwc3_host_exit(dwc);
 		dwc3_gadget_exit(dwc);
 		break;
 	default:
@@ -464,8 +491,14 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 	dwc3_debugfs_exit(dwc);
 
 	switch (dwc->mode) {
-	case DWC3_MODE_DRD:
 	case DWC3_MODE_DEVICE:
+		dwc3_gadget_exit(dwc);
+		break;
+	case DWC3_MODE_HOST:
+		dwc3_host_exit(dwc);
+		break;
+	case DWC3_MODE_DRD:
+		dwc3_host_exit(dwc);
 		dwc3_gadget_exit(dwc);
 		break;
 	default:
