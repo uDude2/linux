@@ -41,6 +41,7 @@
 
 #include <linux/device.h>
 #include <linux/spinlock.h>
+#include <linux/ioport.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
 #include <linux/mm.h>
@@ -52,7 +53,7 @@
 /* Global constants */
 #define DWC3_ENDPOINTS_NUM	32
 
-#define DWC3_EVENT_BUFFERS_NUM	2
+#define DWC3_EVENT_BUFFERS_MAX	2
 #define DWC3_EVENT_BUFFERS_SIZE	PAGE_SIZE
 #define DWC3_EVENT_TYPE_MASK	0xfe
 
@@ -153,6 +154,7 @@
 #define DWC3_GCTL_CLK_PIPEHALF	(2)
 #define DWC3_GCTL_CLK_MASK	(3)
 
+#define DWC3_GCTL_PRTCAP(n)	(((n) & (3 << 12)) >> 12)
 #define DWC3_GCTL_PRTCAPDIR(n)	(n << 12)
 #define DWC3_GCTL_PRTCAP_HOST	1
 #define DWC3_GCTL_PRTCAP_DEVICE	2
@@ -536,6 +538,17 @@ struct dwc3_hwparams {
 	u32	hwparams8;
 };
 
+/* HWPARAMS0 */
+#define DWC3_MODE(n)		((n) & 0x7)
+
+#define DWC3_MODE_DEVICE	0
+#define DWC3_MODE_HOST		1
+#define DWC3_MODE_DRD		2
+#define DWC3_MODE_HUB		3
+
+/* HWPARAMS1 */
+#define DWC3_NUM_INT(n)	(((n) & (0x3f << 15)) >> 15)
+
 /**
  * struct dwc3 - representation of our controller
  * @ctrl_req: usb control request which is used for ep0
@@ -549,13 +562,17 @@ struct dwc3_hwparams {
  * @ep0_bounce_addr: dma address of ep0_bounce
  * @lock: for synchronizing
  * @dev: pointer to our struct device
+ * @xhci: pointer to our xHCI child
  * @event_buffer_list: a list of event buffers
  * @gadget: device side representation of the peripheral controller
  * @gadget_driver: pointer to the gadget driver
  * @regs: base address for our registers
  * @regs_size: address space size
  * @irq: IRQ number
+ * @num_event_buffers: calculated number of event buffers
+ * @maximum_speed: maximum speed requested (mainly for testing purposes)
  * @revision: revision register contents
+ * @mode: mode of operation
  * @is_selfpowered: true when we are selfpowered
  * @three_stage_setup: set if we perform a three phase setup
  * @ep0_status_pending: ep0 status response without a req is pending
@@ -584,7 +601,10 @@ struct dwc3 {
 	spinlock_t		lock;
 	struct device		*dev;
 
-	struct dwc3_event_buffer *ev_buffs[DWC3_EVENT_BUFFERS_NUM];
+	struct platform_device	*xhci;
+	struct resource		*res;
+
+	struct dwc3_event_buffer *ev_buffs[DWC3_EVENT_BUFFERS_MAX];
 	struct dwc3_ep		*eps[DWC3_ENDPOINTS_NUM];
 
 	struct usb_gadget	gadget;
@@ -595,7 +615,10 @@ struct dwc3 {
 
 	int			irq;
 
+	u32			num_event_buffers;
+	u32			maximum_speed;
 	u32			revision;
+	u32			mode;
 
 #define DWC3_REVISION_173A	0x5533173a
 #define DWC3_REVISION_175A	0x5533175a
@@ -764,5 +787,12 @@ union dwc3_event {
 #define DWC3_HAS_PERIPHERAL		BIT(0)
 #define DWC3_HAS_XHCI			BIT(1)
 #define DWC3_HAS_OTG			BIT(3)
+
+/* prototypes */
+int dwc3_host_init(struct dwc3 *dwc);
+void dwc3_host_exit(struct dwc3 *dwc);
+
+int dwc3_gadget_init(struct dwc3 *dwc);
+void dwc3_gadget_exit(struct dwc3 *dwc);
 
 #endif /* __DRIVERS_USB_DWC3_CORE_H */
