@@ -586,7 +586,19 @@ dev_qualifier = {
 	.bNumConfigurations =	1,
 };
 
+static int populate_bos(struct fsg_dev *fsg, u8 *buf)
+{
+	memcpy(buf, &fsg_bos_desc, USB_DT_BOS_SIZE);
+	buf += USB_DT_BOS_SIZE;
 
+	memcpy(buf, &fsg_ext_cap_desc, USB_DT_USB_EXT_CAP_SIZE);
+	buf += USB_DT_USB_EXT_CAP_SIZE;
+
+	memcpy(buf, &fsg_ss_cap_desc, USB_DT_USB_SS_CAP_SIZE);
+
+	return USB_DT_BOS_SIZE + USB_DT_USB_SS_CAP_SIZE
+		+ USB_DT_USB_EXT_CAP_SIZE;
+}
 
 /*
  * Config descriptors must agree with the code that sets configurations
@@ -940,7 +952,8 @@ static int standard_setup_req(struct fsg_dev *fsg,
 			break;
 		case USB_DT_DEVICE_QUALIFIER:
 			VDBG(fsg, "get device qualifier\n");
-			if (!gadget_is_dualspeed(fsg->gadget))
+			if (!gadget_is_dualspeed(fsg->gadget) ||
+					fsg->gadget->speed == USB_SPEED_SUPER)
 				break;
 			/*
 			 * Assume ep0 uses the same maxpacket value for both
@@ -953,7 +966,8 @@ static int standard_setup_req(struct fsg_dev *fsg,
 
 		case USB_DT_OTHER_SPEED_CONFIG:
 			VDBG(fsg, "get other-speed config descriptor\n");
-			if (!gadget_is_dualspeed(fsg->gadget))
+			if (!gadget_is_dualspeed(fsg->gadget) ||
+					fsg->gadget->speed == USB_SPEED_SUPER)
 				break;
 			goto get_config;
 		case USB_DT_CONFIG:
@@ -972,7 +986,15 @@ get_config:
 			value = usb_gadget_get_string(&fsg_stringtab,
 					w_value & 0xff, req->buf);
 			break;
+
+		case USB_DT_BOS:
+			VDBG(fsg, "get bos descriptor\n");
+
+			if (gadget_is_superspeed(fsg->gadget))
+				value = populate_bos(fsg, req->buf);
+			break;
 		}
+
 		break;
 
 	/* One config, two speeds */
@@ -1340,9 +1362,7 @@ static int do_write(struct fsg_dev *fsg)
 			 * equal to the buffer size, which is divisible by
 			 * the bulk-out maxpacket size.
 			 */
-			bh->outreq->length = bh->bulk_out_intended_length =
-					amount;
-			bh->outreq->short_not_ok = 1;
+			set_bulk_out_req_length(fsg, bh, amount);
 			start_transfer(fsg, fsg->bulk_out, bh->outreq,
 					&bh->outreq_busy, &bh->state);
 			fsg->next_buffhd_to_fill = bh->next;
@@ -1374,6 +1394,11 @@ static int do_write(struct fsg_dev *fsg)
 	(unsigned long long) curlun->file_length);
 				amount = curlun->file_length - file_offset;
 			}
+
+			/* Don't accept excess data.  The spec doesn't say
+			 * what to do in this case.  We'll ignore the error.
+			 */
+			amount = min(amount, bh->bulk_out_intended_length);
 
 			/* Don't write a partial block */
 			amount = round_down(amount, curlun->blksize);
@@ -1414,7 +1439,7 @@ static int do_write(struct fsg_dev *fsg)
 
  empty_write:
 			/* Did the host decide to stop early? */
-			if (bh->outreq->actual != bh->outreq->length) {
+			if (bh->outreq->actual < bh->bulk_out_intended_length) {
 				fsg->short_packet_received = 1;
 				break;
 			}
@@ -1958,7 +1983,7 @@ static int throw_away_data(struct fsg_dev *fsg)
 			fsg->next_buffhd_to_drain = bh->next;
 
 			/* A short packet or an error ends everything */
-			if (bh->outreq->actual != bh->outreq->length ||
+			if (bh->outreq->actual < bh->bulk_out_intended_length ||
 					bh->outreq->status != 0) {
 				raise_exception(fsg, FSG_STATE_ABORT_BULK_OUT);
 				return -EINTR;
@@ -1976,9 +2001,7 @@ static int throw_away_data(struct fsg_dev *fsg)
 			 * equal to the buffer size, which is divisible by
 			 * the bulk-out maxpacket size.
 			 */
-			bh->outreq->length = bh->bulk_out_intended_length =
-					amount;
-			bh->outreq->short_not_ok = 1;
+			set_bulk_out_req_length(fsg, bh, amount);
 			start_transfer(fsg, fsg->bulk_out, bh->outreq,
 					&bh->outreq_busy, &bh->state);
 			fsg->next_buffhd_to_fill = bh->next;
@@ -2657,7 +2680,6 @@ static int get_next_command(struct fsg_dev *fsg)
 
 		/* Queue a request to read a Bulk-only CBW */
 		set_bulk_out_req_length(fsg, bh, USB_BULK_CB_WRAP_LEN);
-		bh->outreq->short_not_ok = 1;
 		start_transfer(fsg, fsg->bulk_out, bh->outreq,
 				&bh->outreq_busy, &bh->state);
 
@@ -2856,18 +2878,10 @@ static int do_set_config(struct fsg_dev *fsg, u8 new_config)
 		fsg->config = new_config;
 		if ((rc = do_set_interface(fsg, 0)) != 0)
 			fsg->config = 0;	// Reset on errors
-		else {
-			char *speed;
-
-			switch (fsg->gadget->speed) {
-			case USB_SPEED_LOW:	speed = "low";	break;
-			case USB_SPEED_FULL:	speed = "full";	break;
-			case USB_SPEED_HIGH:	speed = "high";	break;
-			case USB_SPEED_SUPER:	speed = "super"; break;
-			default: 		speed = "?";	break;
-			}
-			INFO(fsg, "%s speed config #%d\n", speed, fsg->config);
-		}
+		else
+			INFO(fsg, "%s config #%d\n",
+			     usb_speed_string(fsg->gadget->speed),
+			     fsg->config);
 	}
 	return rc;
 }
