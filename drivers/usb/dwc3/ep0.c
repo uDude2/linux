@@ -733,6 +733,28 @@ static void dwc3_ep0_do_control_status(struct dwc3 *dwc,
 static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 		const struct dwc3_event_depevt *event)
 {
+	if (dwc->ep0_next_event == DWC3_EP0_COMPLETE) {
+		char *s;
+
+		switch (event->status) {
+		case DEPEVT_STATUS_CONTROL_SETUP:
+			s = "Setup";
+			break;
+		case DEPEVT_STATUS_CONTROL_DATA:
+			s = "Data";
+			break;
+		case DEPEVT_STATUS_CONTROL_STATUS:
+			s = "Status";
+			break;
+		default:
+			s = "Unknown";
+		}
+
+		dev_vdbg(dwc->dev, "Unexpected XferNotReady(%s)\n", s);
+		dwc3_ep0_stall_and_restart(dwc);
+		return;
+	}
+
 	switch (event->status) {
 	case DEPEVT_STATUS_CONTROL_SETUP:
 		dev_vdbg(dwc->dev, "Control Setup\n");
