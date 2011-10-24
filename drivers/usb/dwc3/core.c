@@ -514,11 +514,19 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct of_device_id of_dwc3_match[] = {
+	{
+		"synosys,dwc3",
+	},
+	{  }, /* Terminating Entry */
+};
+
 static struct platform_driver dwc3_driver = {
 	.probe		= dwc3_probe,
 	.remove		= __devexit_p(dwc3_remove),
 	.driver		= {
 		.name	= "dwc3",
+		.of_match_table = of_dwc3_match,
 	},
 };
 
