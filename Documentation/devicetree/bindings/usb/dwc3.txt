@@ -1,0 +1,66 @@
+Synopsys DesignWareCores SuperSpeed USB 3.0 Controller
+
+The device node for a USB3 Wrapper that is part of an OMAP5 SoC is as described
+in the document "Open Firmware Recommended Practice: Universal Serial Bus" with
+the following modifications and additions:
+
+Required properties:
+	- compatible : should be "ti,omap5-dwc3" or "ti,omap5430-dwc3".
+	- reg : the first address and length contains the address of DRD. The
+		second address and length contains the address of the wrapper.
+	- interrupts : < a b > where 'a' is the interrupt number and 'b' is a
+		field that represents an encoding of the sense and level
+		information for the interrupt line.
+	- child device : The child Synopsys DesignWareCore USB 3.0 DRD Controller
+
+Optional properties:
+	- utmi_mode : UTMI mode of the wrapper Interrupts (SW or HW). Refer to
+		OMAP5 TRM for more details (for TI wrapper only)
+
+Example of hardware mode OMAP5:
+
+	usb@4a030000 {
+		#address-cells = < 1 >;
+		#size-cells = < 1 >;
+		compatible = "ti,omap5430-dwc3", "ti,omap5-dwc3";
+		interrupt-parent = < &intc >;
+		interrupts = < 93 4 >;
+		reg = < 0x4a030000 0x10000 >;
+		utmi_mode = "hardware";
+		range;
+
+		usb@4a020000 {
+			#address-cells = < 3 >;
+			#size-cells = < 3 >;
+			compatible = "synopsys,dwc3";
+			interrupt-parent = < &intc >;
+			interupts = < 92 4 >;
+			reg = <	0x4a020000 0x8000       // First address is xHCI
+				0x4a02c100 0x600        // Second is Global
+				0x4a02c700 0x500 >;     // Third is Device
+		};
+	};
+
+Example of software mode OMAP5:
+
+	usb@4a030000 {
+		#address-cells = < 1 >;
+		#size-cells = < 1 >;
+		compatible = "ti,omap5430-dwc3", "ti,omap5-dwc3";
+		interrupt-parent = < &intc >;
+		interrupts = < 93 4 >;
+		reg = < 0x4a030000 0x10000 >;
+		utmi_mode = "software";
+		range;
+
+		usb@4a020000 {
+			#address-cells = < 3 >;
+			#size-cells = < 3 >;
+			compatible = "synopsys,dwc3";
+			interrupt-parent = < &intc >;
+			interupts = < 92 4 >;
+			reg = <	0x4a020000 0x8000       // First address is xHCI
+				0x4a02c100 0x600        // Second is Global
+				0x4a02c700 0x500 >;     // Third is Device
+		};
+	};
