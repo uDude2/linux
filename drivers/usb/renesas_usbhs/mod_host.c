@@ -1199,7 +1199,6 @@ static int usbhsh_start(struct usbhs_priv *priv)
 	 * - host
 	 * - usb module
 	 */
-	usbhs_sys_hispeed_ctrl(priv, 1);
 	usbhs_sys_host_ctrl(priv, 1);
 	usbhs_sys_usb_ctrl(priv, 1);
 
@@ -1226,7 +1225,6 @@ static int usbhsh_stop(struct usbhs_priv *priv)
 	usb_remove_hcd(hcd);
 
 	/* disable sys */
-	usbhs_sys_hispeed_ctrl(priv, 0);
 	usbhs_sys_host_ctrl(priv, 0);
 	usbhs_sys_usb_ctrl(priv, 0);
 
