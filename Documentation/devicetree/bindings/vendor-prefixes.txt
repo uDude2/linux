@@ -36,5 +36,6 @@ schindler	Schindler
 simtek
 sirf	SiRF Technology, Inc.
 stericsson	ST-Ericsson
+synopsys	Synopsys
 ti	Texas Instruments
 xlnx	Xilinx
