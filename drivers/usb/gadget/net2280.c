@@ -33,15 +33,6 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
 #undef	DEBUG		/* messages on error and most fault paths */
@@ -2455,7 +2446,7 @@ static void handle_stat1_irqs (struct net2280 *dev, u32 stat)
 	mask = (1 << HIGH_SPEED) | (1 << FULL_SPEED);
 
 	/* VBUS disconnect is indicated by VBUS_PIN and VBUS_INTERRUPT set.
-	 * Root Port Reset is indicated by ROOT_PORT_RESET_INTERRRUPT set and
+	 * Root Port Reset is indicated by ROOT_PORT_RESET_INTERRUPT set and
 	 * both HIGH_SPEED and FULL_SPEED clear (as ROOT_PORT_RESET_INTERRUPT
 	 * only indicates a change in the reset state).
 	 */

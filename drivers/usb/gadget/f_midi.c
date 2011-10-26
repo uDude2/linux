@@ -644,7 +644,7 @@ static int f_midi_out_open(struct snd_rawmidi_substream *substream)
 {
 	struct f_midi *midi = substream->rmidi->private_data;
 
-	if (!substream->number >= MAX_PORTS)
+	if (substream->number >= MAX_PORTS)
 		return -EINVAL;
 
 	VDBG(midi, "%s()\n", __func__);
@@ -951,7 +951,7 @@ int __init f_midi_bind_config(struct usb_configuration *c,
 		struct gmidi_in_port *port = kzalloc(sizeof(*port), GFP_KERNEL);
 		if (!port) {
 			status = -ENOMEM;
-			goto fail;
+			goto setup_fail;
 		}
 
 		port->midi = midi;
@@ -989,6 +989,8 @@ int __init f_midi_bind_config(struct usb_configuration *c,
 	return 0;
 
 setup_fail:
+	for (--i; i >= 0; i--)
+		kfree(midi->in_port[i]);
 	kfree(midi);
 fail:
 	return status;

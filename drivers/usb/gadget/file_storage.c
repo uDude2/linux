@@ -616,15 +616,10 @@ static int populate_config_buf(struct usb_gadget *gadget,
 		return -EINVAL;
 
 	if (gadget_is_dualspeed(gadget) && type == USB_DT_OTHER_SPEED_CONFIG)
-		speed = (USB_SPEED_FULL + USB_SPEED_HIGH +
-				USB_SPEED_SUPER) - speed;
-
-	if (gadget_is_superspeed(gadget) && speed == USB_SPEED_SUPER)
-		function = (const struct usb_descriptor_header **) fsg_ss_function;
-	else if (gadget_is_dualspeed(gadget) && speed == USB_SPEED_HIGH)
-		function = (const struct usb_descriptor_header **) fsg_hs_function;
-	else
-		function = (const struct usb_descriptor_header **)fsg_fs_function;
+		speed = (USB_SPEED_FULL + USB_SPEED_HIGH) - speed;
+	function = gadget_is_dualspeed(gadget) && speed == USB_SPEED_HIGH
+		? (const struct usb_descriptor_header **)fsg_hs_function
+		: (const struct usb_descriptor_header **)fsg_fs_function;
 
 	/* for now, don't advertise srp-only devices */
 	if (!gadget_is_otg(gadget))
@@ -3158,6 +3153,15 @@ static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
 	DBG(fsg, "unbind\n");
 	clear_bit(REGISTERED, &fsg->atomic_bitflags);
 
+	/* If the thread isn't already dead, tell it to exit now */
+	if (fsg->state != FSG_STATE_TERMINATED) {
+		raise_exception(fsg, FSG_STATE_EXIT);
+		wait_for_completion(&fsg->thread_notifier);
+
+		/* The cleanup routine waits for this completion also */
+		complete(&fsg->thread_notifier);
+	}
+
 	/* Unregister the sysfs attribute files and the LUNs */
 	for (i = 0; i < fsg->nluns; ++i) {
 		curlun = &fsg->luns[i];
@@ -3169,15 +3173,6 @@ static void /* __init_or_exit */ fsg_unbind(struct usb_gadget *gadget)
 			device_unregister(&curlun->dev);
 			curlun->registered = 0;
 		}
-	}
-
-	/* If the thread isn't already dead, tell it to exit now */
-	if (fsg->state != FSG_STATE_TERMINATED) {
-		raise_exception(fsg, FSG_STATE_EXIT);
-		wait_for_completion(&fsg->thread_notifier);
-
-		/* The cleanup routine waits for this completion also */
-		complete(&fsg->thread_notifier);
 	}
 
 	/* Free the data buffers */

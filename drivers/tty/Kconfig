@@ -60,9 +60,13 @@ config VT_CONSOLE
 
 	  If unsure, say Y.
 
+config VT_CONSOLE_SLEEP
+	def_bool y
+	depends on VT_CONSOLE && PM_SLEEP
+
 config HW_CONSOLE
 	bool
-	depends on VT && !S390 && !UML
+	depends on VT && !UML
 	default y
 
 config VT_HW_CONSOLE_BINDING
