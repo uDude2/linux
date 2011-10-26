@@ -190,9 +190,7 @@ int dwc3_gadget_ep0_queue(struct usb_ep *ep, struct usb_request *request,
 	}
 
 	/* we share one TRB for ep0/1 */
-	if (!list_empty(&dwc->eps[0]->request_list) ||
-			!list_empty(&dwc->eps[1]->request_list) ||
-			dwc->ep0_status_pending) {
+	if (!list_empty(&dep->request_list)) {
 		ret = -EBUSY;
 		goto out;
 	}
@@ -214,8 +212,8 @@ static void dwc3_ep0_stall_and_restart(struct dwc3 *dwc)
 	struct dwc3_ep		*dep = dwc->eps[0];
 
 	/* stall is always issued on EP0 */
-	__dwc3_gadget_ep_set_halt(dwc->eps[0], 1);
-	dwc->eps[0]->flags = DWC3_EP_ENABLED;
+	__dwc3_gadget_ep_set_halt(dep, 1);
+	dep->flags = DWC3_EP_ENABLED;
 
 	if (!list_empty(&dep->request_list)) {
 		struct dwc3_request	*req;
@@ -254,13 +252,9 @@ static struct dwc3_ep *dwc3_wIndex_to_dep(struct dwc3 *dwc, __le16 wIndex_le)
 	return NULL;
 }
 
-static void dwc3_ep0_send_status_response(struct dwc3 *dwc)
+static void dwc3_ep0_status_cmpl(struct usb_ep *ep, struct usb_request *req)
 {
-	dwc3_ep0_start_trans(dwc, 1, dwc->setup_buf_addr,
-			dwc->ep0_usb_req.length,
-			DWC3_TRBCTL_CONTROL_DATA);
 }
-
 /*
  * ch 9.4.5
  */
@@ -303,9 +297,10 @@ static int dwc3_ep0_handle_status(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl
 	response_pkt = (__le16 *) dwc->setup_buf;
 	*response_pkt = cpu_to_le16(usb_status);
 	dwc->ep0_usb_req.length = sizeof(*response_pkt);
-	dwc->ep0_status_pending = 1;
-
-	return 0;
+	dwc->ep0_usb_req.dma = dwc->setup_buf_addr;
+	dwc->ep0_usb_req.complete = dwc3_ep0_status_cmpl;
+	return usb_ep_queue(&dwc->eps[0]->endpoint, &dwc->ep0_usb_req,
+			GFP_ATOMIC);
 }
 
 static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
@@ -396,8 +391,7 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 	case USB_RECIP_ENDPOINT:
 		switch (wValue) {
 		case USB_ENDPOINT_HALT:
-
-			dep =  dwc3_wIndex_to_dep(dwc, ctrl->wIndex);
+			dep =  dwc3_wIndex_to_dep(dwc, wIndex);
 			if (!dep)
 				return -EINVAL;
 			ret = __dwc3_gadget_ep_set_halt(dep, set);
@@ -422,8 +416,15 @@ static int dwc3_ep0_set_address(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 	u32 reg;
 
 	addr = le16_to_cpu(ctrl->wValue);
-	if (addr > 127)
+	if (addr > 127) {
+		dev_dbg(dwc->dev, "invalid device address %d\n", addr);
 		return -EINVAL;
+	}
+
+	if (dwc->dev_state == DWC3_CONFIGURED_STATE) {
+		dev_dbg(dwc->dev, "trying to set address when configured\n");
+		return -EINVAL;
+	}
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
 	reg &= ~(DWC3_DCFG_DEVADDR_MASK);
@@ -550,27 +551,21 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 	struct dwc3_request	*r = NULL;
 	struct usb_request	*ur;
 	struct dwc3_trb		trb;
-	struct dwc3_ep		*dep;
+	struct dwc3_ep		*ep0;
 	u32			transferred;
 	u8			epnum;
 
 	epnum = event->endpoint_number;
-	dep = dwc->eps[epnum];
+	ep0 = dwc->eps[0];
 
 	dwc->ep0_next_event = DWC3_EP0_NRDY_STATUS;
 
-	if (!dwc->ep0_status_pending) {
-		r = next_request(&dwc->eps[0]->request_list);
-		ur = &r->request;
-	} else {
-		ur = &dwc->ep0_usb_req;
-		dwc->ep0_status_pending = 0;
-	}
+	r = next_request(&ep0->request_list);
+	ur = &r->request;
 
 	dwc3_trb_to_nat(dwc->ep0_trb, &trb);
 
 	if (dwc->ep0_bounced) {
-		struct dwc3_ep	*ep0 = dwc->eps[0];
 
 		transferred = min_t(u32, ur->length,
 				ep0->endpoint.maxpacket - trb.length);
@@ -591,7 +586,7 @@ static void dwc3_ep0_complete_data(struct dwc3 *dwc,
 		 * seems to be case when req.length > maxpacket. Could it be?
 		 */
 		if (r)
-			dwc3_gadget_giveback(dep, r, 0);
+			dwc3_gadget_giveback(ep0, r, 0);
 	}
 }
 
@@ -657,11 +652,6 @@ static void dwc3_ep0_do_control_data(struct dwc3 *dwc,
 	dep = dwc->eps[0];
 	dwc->ep0state = EP0_DATA_PHASE;
 
-	if (dwc->ep0_status_pending) {
-		dwc3_ep0_send_status_response(dwc);
-		return;
-	}
-
 	if (list_empty(&dep->request_list)) {
 		dev_vdbg(dwc->dev, "pending request for EP0 Data phase\n");
 		dep->flags |= DWC3_EP_PENDING_REQUEST;
@@ -726,6 +716,28 @@ static void dwc3_ep0_do_control_status(struct dwc3 *dwc,
 static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 		const struct dwc3_event_depevt *event)
 {
+	if (dwc->ep0_next_event == DWC3_EP0_COMPLETE) {
+		char *s;
+
+		switch (event->status) {
+		case DEPEVT_STATUS_CONTROL_SETUP:
+			s = "Setup";
+			break;
+		case DEPEVT_STATUS_CONTROL_DATA:
+			s = "Data";
+			break;
+		case DEPEVT_STATUS_CONTROL_STATUS:
+			s = "Status";
+			break;
+		default:
+			s = "Unknown";
+		}
+
+		dev_vdbg(dwc->dev, "Unexpected XferNotReady(%s)\n", s);
+		dwc3_ep0_stall_and_restart(dwc);
+		return;
+	}
+
 	switch (event->status) {
 	case DEPEVT_STATUS_CONTROL_SETUP:
 		dev_vdbg(dwc->dev, "Control Setup\n");
