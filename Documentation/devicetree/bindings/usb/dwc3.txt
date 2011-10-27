@@ -19,48 +19,48 @@ Optional properties:
 
 Example of hardware mode OMAP5:
 
-	usb@4a030000 {
+	usb@4a020000 {
 		#address-cells = < 1 >;
 		#size-cells = < 1 >;
 		compatible = "ti,omap5430-dwc3", "ti,omap5-dwc3";
 		interrupt-parent = < &intc >;
 		interrupts = < 93 4 >;
-		reg = < 0x4a030000 0x10000 >;
+		reg = < 0x4a020000 0x10000 >;
 		utmi_mode = "hardware";
 		range;
 
-		usb@4a020000 {
+		usb@4a030000 {
 			#address-cells = < 3 >;
 			#size-cells = < 3 >;
 			compatible = "synopsys,dwc3";
 			interrupt-parent = < &intc >;
 			interupts = < 92 4 >;
-			reg = <	0x4a020000 0x8000       // First address is xHCI
-				0x4a02c100 0x600        // Second is Global
-				0x4a02c700 0x500 >;     // Third is Device
+			reg = <	0x4a030000 0x8000       // First address is xHCI
+				0x4a03c100 0x600        // Second is Global
+				0x4a03c700 0x500 >;     // Third is Device
 		};
 	};
 
 Example of software mode OMAP5:
 
-	usb@4a030000 {
+	usb@4a020000 {
 		#address-cells = < 1 >;
 		#size-cells = < 1 >;
 		compatible = "ti,omap5430-dwc3", "ti,omap5-dwc3";
 		interrupt-parent = < &intc >;
 		interrupts = < 93 4 >;
-		reg = < 0x4a030000 0x10000 >;
+		reg = < 0x4a020000 0x10000 ;
 		utmi_mode = "software";
 		range;
 
-		usb@4a020000 {
+		usb@4a030000 {
 			#address-cells = < 3 >;
 			#size-cells = < 3 >;
 			compatible = "synopsys,dwc3";
 			interrupt-parent = < &intc >;
 			interupts = < 92 4 >;
-			reg = <	0x4a020000 0x8000       // First address is xHCI
-				0x4a02c100 0x600        // Second is Global
-				0x4a02c700 0x500 >;     // Third is Device
+			reg = <	0x4a030000 0x8000       // First address is xHCI
+				0x4a03c100 0x600        // Second is Global
+				0x4a03c700 0x500 >;     // Third is Device
 		};
 	};
