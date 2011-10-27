@@ -730,7 +730,20 @@ static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 			s = "Status";
 			break;
 		default:
-			s = "Unknown";
+			/*
+			 * Case we can't decode a Control Stage from
+			 * the event it might mean that HW is too slow
+			 * in fetching TRB to its own internal caches.
+			 *
+			 * In that case, we will just return early and
+			 * hope for the best.
+			 *
+			 * This case should never happen, anyway, on a
+			 * silicon, it's just here to help with FPGA
+			 * prototyping.
+			 */
+			dev_dbg(dwc->dev, "can't decode Control Stage.\n");
+			return;
 		}
 
 		dev_vdbg(dwc->dev, "Unexpected XferNotReady(%s)\n", s);
