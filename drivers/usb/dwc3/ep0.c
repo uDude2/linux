@@ -716,38 +716,38 @@ static void dwc3_ep0_do_control_status(struct dwc3 *dwc,
 static void dwc3_ep0_xfernotready(struct dwc3 *dwc,
 		const struct dwc3_event_depevt *event)
 {
+	/*
+	 * This part is very tricky: If we has just handled
+	 * XferNotReady(Setup) and we're now expecting a
+	 * XferComplete but, instead, we receive another
+	 * XferNotReady(Setup), we should STALL and restart
+	 * the state machine.
+	 *
+	 * In all other cases, we just continue waiting
+	 * for the XferComplete event.
+	 *
+	 * We are a little bit unsafe here because we're
+	 * not trying to ensure that last event was, indeed,
+	 * XferNotReady(Setup).
+	 *
+	 * Still, we don't expect any condition where that
+	 * should happen and, even if it does, it would be
+	 * another error condition.
+	 */
 	if (dwc->ep0_next_event == DWC3_EP0_COMPLETE) {
-		char *s;
-
 		switch (event->status) {
 		case DEPEVT_STATUS_CONTROL_SETUP:
-			s = "Setup";
+			dev_vdbg(dwc->dev, "Unexpected XferNotReady(Setup)\n");
+			dwc3_ep0_stall_and_restart(dwc);
 			break;
 		case DEPEVT_STATUS_CONTROL_DATA:
-			s = "Data";
-			break;
+			/* FALLTHROUGH */
 		case DEPEVT_STATUS_CONTROL_STATUS:
-			s = "Status";
-			break;
+			/* FALLTHROUGH */
 		default:
-			/*
-			 * Case we can't decode a Control Stage from
-			 * the event it might mean that HW is too slow
-			 * in fetching TRB to its own internal caches.
-			 *
-			 * In that case, we will just return early and
-			 * hope for the best.
-			 *
-			 * This case should never happen, anyway, on a
-			 * silicon, it's just here to help with FPGA
-			 * prototyping.
-			 */
-			dev_dbg(dwc->dev, "can't decode Control Stage.\n");
-			return;
+			dev_vdbg(dwc->dev, "waiting for XferComplete\n");
 		}
 
-		dev_vdbg(dwc->dev, "Unexpected XferNotReady(%s)\n", s);
-		dwc3_ep0_stall_and_restart(dwc);
 		return;
 	}
 
