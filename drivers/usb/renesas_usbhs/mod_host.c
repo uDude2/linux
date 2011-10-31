@@ -317,7 +317,7 @@ usbhsh_device_find:
 	udev->usbv = usbv;
 
 	/* set device config */
-	usbhs_set_device_speed(priv,
+	usbhs_set_device_config(priv,
 			       usbhsh_device_number(hpriv, udev),
 			       usbhsh_device_number(hpriv, udev),
 			       0, /* FIXME no parent */
@@ -421,7 +421,7 @@ struct usbhsh_ep *usbhsh_endpoint_alloc(struct usbhsh_hpriv *hpriv,
 
 	/*
 	 * usbhs_pipe_config_update() should be called after
-	 * usbhs_device_config()
+	 * usbhs_set_device_config()
 	 * see
 	 *  DCPMAXP/PIPEMAXP
 	 */
