@@ -681,9 +681,7 @@ static int usbhsg_try_start(struct usbhs_priv *priv, u32 status)
 	 * - function
 	 * - usb module
 	 */
-	usbhs_sys_hispeed_ctrl(priv, 1);
 	usbhs_sys_function_ctrl(priv, 1);
-	usbhs_sys_usb_ctrl(priv, 1);
 
 	/*
 	 * enable irq callback
@@ -731,9 +729,7 @@ static int usbhsg_try_stop(struct usbhs_priv *priv, u32 status)
 	gpriv->gadget.speed = USB_SPEED_UNKNOWN;
 
 	/* disable sys */
-	usbhs_sys_hispeed_ctrl(priv, 0);
 	usbhs_sys_function_ctrl(priv, 0);
-	usbhs_sys_usb_ctrl(priv, 0);
 
 	usbhsg_pipe_disable(dcp);
 
@@ -757,7 +753,7 @@ static int usbhsg_gadget_start(struct usb_gadget *gadget,
 
 	if (!driver		||
 	    !driver->setup	||
-	    driver->speed != USB_SPEED_HIGH)
+	    driver->max_speed != USB_SPEED_HIGH)
 		return -EINVAL;
 
 	dev  = usbhsg_gpriv_to_dev(gpriv);
@@ -830,7 +826,7 @@ static int usbhsg_stop(struct usbhs_priv *priv)
 	return usbhsg_try_stop(priv, USBHSG_STATUS_STARTED);
 }
 
-int __devinit usbhs_mod_gadget_probe(struct usbhs_priv *priv)
+int usbhs_mod_gadget_probe(struct usbhs_priv *priv)
 {
 	struct usbhsg_gpriv *gpriv;
 	struct usbhsg_uep *uep;
@@ -881,7 +877,7 @@ int __devinit usbhs_mod_gadget_probe(struct usbhs_priv *priv)
 	gpriv->gadget.dev.parent	= dev;
 	gpriv->gadget.name		= "renesas_usbhs_udc";
 	gpriv->gadget.ops		= &usbhsg_gadget_ops;
-	gpriv->gadget.is_dualspeed	= 1;
+	gpriv->gadget.max_speed		= USB_SPEED_HIGH;
 
 	INIT_LIST_HEAD(&gpriv->gadget.ep_list);
 
@@ -927,7 +923,7 @@ usbhs_mod_gadget_probe_err_gpriv:
 	return ret;
 }
 
-void __devexit usbhs_mod_gadget_remove(struct usbhs_priv *priv)
+void usbhs_mod_gadget_remove(struct usbhs_priv *priv)
 {
 	struct usbhsg_gpriv *gpriv = usbhsg_priv_to_gpriv(priv);
 

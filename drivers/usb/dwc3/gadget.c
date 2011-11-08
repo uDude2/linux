@@ -745,8 +745,9 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 	dep->flags |= DWC3_EP_BUSY;
 	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
 			dep->number);
-	if (!dep->res_trans_idx)
-		printk_once(KERN_ERR "%s() res_trans_idx is invalid\n", __func__);
+
+	WARN_ON_ONCE(!dep->res_trans_idx);
+
 	return 0;
 }
 
@@ -1155,35 +1156,9 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 	dwc->gadget_driver	= driver;
 	dwc->gadget.dev.driver	= &driver->driver;
 
-	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
-
-	reg &= ~DWC3_GCTL_SCALEDOWN(3);
-	reg &= ~DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_OTG);
-	reg &= ~DWC3_GCTL_DISSCRAMBLE;
-	reg |= DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
-
-	switch (DWC3_GHWPARAMS1_EN_PWROPT(dwc->hwparams.hwparams0)) {
-	case DWC3_GHWPARAMS1_EN_PWROPT_CLK:
-		reg &= ~DWC3_GCTL_DSBLCLKGTNG;
-		break;
-	default:
-		dev_dbg(dwc->dev, "No power optimization available\n");
-	}
-
-	/*
-	 * WORKAROUND: DWC3 revisions <1.90a have a bug
-	 * when The device fails to connect at SuperSpeed
-	 * and falls back to high-speed mode which causes
-	 * the device to enter in a Connect/Disconnect loop
-	 */
-	if (dwc->revision < DWC3_REVISION_190A)
-		reg |= DWC3_GCTL_U2RSTECN;
-
-	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
-
 	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
 	reg &= ~(DWC3_DCFG_SPEED_MASK);
-	reg |= DWC3_DCFG_SUPERSPEED;
+	reg |= dwc->maximum_speed;
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
 	dwc->start_config_issued = false;
@@ -1284,16 +1259,16 @@ static int __devinit dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 			int		ret;
 
 			dep->endpoint.maxpacket = 1024;
+			dep->endpoint.max_streams = 15;
 			dep->endpoint.ops = &dwc3_gadget_ep_ops;
 			list_add_tail(&dep->endpoint.ep_list,
 					&dwc->gadget.ep_list);
 
 			ret = dwc3_alloc_trb_pool(dep);
-			if (ret) {
-				dev_err(dwc->dev, "%s: failed to allocate TRB pool\n", dep->name);
+			if (ret)
 				return ret;
-			}
 		}
+
 		INIT_LIST_HEAD(&dep->request_list);
 		INIT_LIST_HEAD(&dep->req_queued);
 	}
@@ -1333,8 +1308,10 @@ static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
 
 	do {
 		req = next_request(&dep->req_queued);
-		if (!req)
-			break;
+		if (!req) {
+			WARN_ON_ONCE(1);
+			return 1;
+		}
 
 		dwc3_trb_to_nat(req->trb, &trb);
 
@@ -1924,7 +1901,7 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 
 	spin_lock(&dwc->lock);
 
-	for (i = 0; i < DWC3_EVENT_BUFFERS_NUM; i++) {
+	for (i = 0; i < dwc->num_event_buffers; i++) {
 		irqreturn_t status;
 
 		status = dwc3_process_event_buf(dwc, i);
@@ -1985,7 +1962,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 	dev_set_name(&dwc->gadget.dev, "gadget");
 
 	dwc->gadget.ops			= &dwc3_gadget_ops;
-	dwc->gadget.is_dualspeed	= true;
+	dwc->gadget.max_speed		= USB_SPEED_SUPER;
 	dwc->gadget.speed		= USB_SPEED_UNKNOWN;
 	dwc->gadget.dev.parent		= dwc->dev;
 
@@ -2075,16 +2052,12 @@ err0:
 void dwc3_gadget_exit(struct dwc3 *dwc)
 {
 	int			irq;
-	int			i;
 
 	usb_del_gadget_udc(&dwc->gadget);
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0x00);
 	free_irq(irq, dwc);
-
-	for (i = 0; i < ARRAY_SIZE(dwc->eps); i++)
-		__dwc3_gadget_ep_disable(dwc->eps[i]);
 
 	dwc3_gadget_free_endpoints(dwc);
 

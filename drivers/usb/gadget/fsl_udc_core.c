@@ -1717,7 +1717,7 @@ static void dtd_complete_irq(struct fsl_udc *udc)
 
 static inline enum usb_device_speed portscx_device_speed(u32 reg)
 {
-	switch (speed & PORTSCX_PORT_SPEED_MASK) {
+	switch (reg & PORTSCX_PORT_SPEED_MASK) {
 	case PORTSCX_PORT_SPEED_HIGH:
 		return USB_SPEED_HIGH;
 	case PORTSCX_PORT_SPEED_FULL:
@@ -1938,8 +1938,8 @@ static int fsl_start(struct usb_gadget_driver *driver,
 	if (!udc_controller)
 		return -ENODEV;
 
-	if (!driver || (driver->speed != USB_SPEED_FULL
-				&& driver->speed != USB_SPEED_HIGH)
+	if (!driver || (driver->max_speed != USB_SPEED_FULL
+				&& driver->max_speed != USB_SPEED_HIGH)
 			|| !bind || !driver->disconnect || !driver->setup)
 		return -EINVAL;
 
@@ -2531,7 +2531,7 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 
 	/* Setup gadget structure */
 	udc_controller->gadget.ops = &fsl_gadget_ops;
-	udc_controller->gadget.is_dualspeed = 1;
+	udc_controller->gadget.max_speed = USB_SPEED_HIGH;
 	udc_controller->gadget.ep0 = &udc_controller->eps[0].ep;
 	INIT_LIST_HEAD(&udc_controller->gadget.ep_list);
 	udc_controller->gadget.speed = USB_SPEED_UNKNOWN;

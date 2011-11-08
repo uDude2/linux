@@ -275,17 +275,12 @@ u16 usbhs_read(struct usbhs_priv *priv, u32 reg);
 void usbhs_write(struct usbhs_priv *priv, u32 reg, u16 data);
 void usbhs_bset(struct usbhs_priv *priv, u32 reg, u16 mask, u16 data);
 
-int usbhsc_drvcllbck_notify_hotplug(struct platform_device *pdev);
-
 #define usbhs_lock(p, f) spin_lock_irqsave(usbhs_priv_to_lock(p), f)
 #define usbhs_unlock(p, f) spin_unlock_irqrestore(usbhs_priv_to_lock(p), f)
 
 /*
  * sysconfig
  */
-void usbhs_sys_clock_ctrl(struct usbhs_priv *priv, int enable);
-void usbhs_sys_hispeed_ctrl(struct usbhs_priv *priv, int enable);
-void usbhs_sys_usb_ctrl(struct usbhs_priv *priv, int enable);
 void usbhs_sys_host_ctrl(struct usbhs_priv *priv, int enable);
 void usbhs_sys_function_ctrl(struct usbhs_priv *priv, int enable);
 
@@ -311,7 +306,7 @@ int usbhs_frame_get_num(struct usbhs_priv *priv);
 /*
  * device config
  */
-int usbhs_set_device_speed(struct usbhs_priv *priv, int devnum, u16 upphub,
+int usbhs_set_device_config(struct usbhs_priv *priv, int devnum, u16 upphub,
 			   u16 hubport, u16 speed);
 
 /*
