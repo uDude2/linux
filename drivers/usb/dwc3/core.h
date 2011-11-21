@@ -569,6 +569,7 @@ struct dwc3_hwparams {
  * @regs_size: address space size
  * @irq: IRQ number
  * @num_event_buffers: calculated number of event buffers
+ * @u1u2: only used on revisions <1.83a for workaround
  * @maximum_speed: maximum speed requested (mainly for testing purposes)
  * @revision: revision register contents
  * @mode: mode of operation
@@ -577,6 +578,7 @@ struct dwc3_hwparams {
  * @ep0_bounced: true when we used bounce buffer
  * @ep0_expect_in: true when we expect a DATA IN transfer
  * @start_config_issued: true when StartConfig command has been issued
+ * @setup_packet_pending: true when there's a Setup Packet in FIFO. Workaround
  * @ep0_next_event: hold the next expected event
  * @ep0state: state of endpoint zero
  * @link_state: link state
@@ -614,6 +616,7 @@ struct dwc3 {
 	int			irq;
 
 	u32			num_event_buffers;
+	u32			u1u2;
 	u32			maximum_speed;
 	u32			revision;
 	u32			mode;
@@ -631,6 +634,7 @@ struct dwc3 {
 	unsigned		ep0_bounced:1;
 	unsigned		ep0_expect_in:1;
 	unsigned		start_config_issued:1;
+	unsigned		setup_packet_pending:1;
 	unsigned		delayed_status:1;
 
 	enum dwc3_ep0_next	ep0_next_event;

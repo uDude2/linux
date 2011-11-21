@@ -1376,6 +1376,31 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 		dep->flags &= ~DWC3_EP_BUSY;
 		dep->res_trans_idx = 0;
 	}
+
+	/*
+	 * WORKAROUND: This is the 2nd half of U1/U2 -> U0 workaround.
+	 * See dwc3_gadget_linksts_change_interrupt() for 1st half.
+	 */
+	if (dwc->revision < DWC3_REVISION_183A) {
+		u32		reg;
+		int		i;
+
+		for (i = 0; i < DWC3_ENDPOINTS_NUM; i++) {
+			struct dwc3_ep	*dep = dwc->eps[i];
+
+			if (!(dep->flags & DWC3_EP_ENABLED))
+				continue;
+
+			if (!list_empty(&dep->req_queued))
+				return;
+		}
+
+		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+		reg |= dwc->u1u2;
+		dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+		dwc->u1u2 = 0;
+	}
 }
 
 static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
@@ -1615,6 +1640,7 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	dwc->start_config_issued = false;
 
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
+	dwc->setup_packet_pending = false;
 }
 
 static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
@@ -1650,6 +1676,37 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	u32			reg;
 
 	dev_vdbg(dwc->dev, "%s\n", __func__);
+
+	/*
+	 * WORKAROUND: DWC3 revisions <1.88a have an issue which
+	 * would cause a missing Disconnect Event if there's a
+	 * pending Setup Packet in the FIFO.
+	 *
+	 * There's no suggested workaround on the official Bug
+	 * report, which states that "unless the driver/application
+	 * is doing any special handling of a disconnect event,
+	 * there is no functional issue".
+	 *
+	 * Unfortunately, it turns out that we _do_ some special
+	 * handling of a disconnect event, namely complete all
+	 * pending transfers, notify gadget driver of the
+	 * disconnection, and so on.
+	 *
+	 * Our suggested workaround is to follow the Disconnect
+	 * Event steps here, instead, based on a setup_packet_pending
+	 * flag. Such flag gets set whenever we have a XferNotReady
+	 * event on EP0 and gets cleared on XferComplete for the
+	 * same endpoint.
+	 *
+	 * Refers to:
+	 *
+	 * STAR#9000466709: RTL: Device : Disconnect event not
+	 * generated if setup packet pending in FIFO
+	 */
+	if (dwc->revision < DWC3_REVISION_188A) {
+		if (dwc->setup_packet_pending)
+			dwc3_gadget_disconnect_interrupt(dwc);
+	}
 
 	/* Enable PHYs */
 	dwc3_gadget_usb2_phy_power(dwc, true);
@@ -1731,6 +1788,22 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	switch (speed) {
 	case DWC3_DCFG_SUPERSPEED:
+		/*
+		 * WORKAROUND: DWC3 revisions <1.90a have an isue which
+		 * would cause a missing USB3 Reset event.
+		 *
+		 * In such situations, we should force a USB3 Reset
+		 * event by calling our dwc3_gadget_reset_interrupt()
+		 * routing.
+		 *
+		 * Refers to:
+		 *
+		 * STAR#9000483510: RTL: SS : USB3 reset event may
+		 * not be generated always when the link enters poll
+		 */
+		if (dwc->revision < DWC3_REVISION_190A)
+			dwc3_gadget_reset_interrupt(dwc);
+
 		dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
 		dwc->gadget.ep0->maxpacket = 512;
 		dwc->gadget.speed = USB_SPEED_SUPER;
@@ -1794,8 +1867,55 @@ static void dwc3_gadget_wakeup_interrupt(struct dwc3 *dwc)
 static void dwc3_gadget_linksts_change_interrupt(struct dwc3 *dwc,
 		unsigned int evtinfo)
 {
-	/*  The fith bit says SuperSpeed yes or no. */
-	dwc->link_state = evtinfo & DWC3_LINK_STATE_MASK;
+	enum dwc3_link_state	next = evtinfo & DWC3_LINK_STATE_MASK;
+
+	/*
+	 * WORKAROUND: DWC3 Revisions <1.83a have an issue which, depending
+	 * on the link partner, the USB session might do multiple entry/exit
+	 * of low power states before a transfer takes place.
+	 *
+	 * Due to this problem, we might experience lower throughput. The
+	 * suggested workaround is to disable DCTL[12:9] bits if we're
+	 * transitioning from U1/U2 to U0 and enable those bits again
+	 * after a transfer completes and there are no pending transfers
+	 * on any of the enabled endpoints.
+	 *
+	 * This is the first half of that workaround.
+	 *
+	 * Refers to:
+	 *
+	 * STAR#9000446952: RTL: Device SS : if U1/U2 ->U0 takes >128us
+	 * core send LGO_Ux entering U0
+	 */
+	if (dwc->revision < DWC3_REVISION_183A) {
+		if (next == DWC3_LINK_STATE_U0) {
+			u32	u1u2;
+			u32	reg;
+
+			switch (dwc->link_state) {
+			case DWC3_LINK_STATE_U1:
+			case DWC3_LINK_STATE_U2:
+				reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+				u1u2 = reg & (DWC3_DCTL_INITU2ENA
+						| DWC3_DCTL_ACCEPTU2ENA
+						| DWC3_DCTL_INITU1ENA
+						| DWC3_DCTL_ACCEPTU1ENA);
+
+				if (!dwc->u1u2)
+					dwc->u1u2 = reg & u1u2;
+
+				reg &= ~u1u2;
+
+				dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+				break;
+			default:
+				/* do nothing */
+				break;
+			}
+		}
+	}
+
+	dwc->link_state = next;
 
 	dev_vdbg(dwc->dev, "%s link %d\n", __func__, dwc->link_state);
 }
