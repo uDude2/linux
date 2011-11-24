@@ -599,7 +599,7 @@ static int __devexit dwc3_remove(struct platform_device *pdev)
 
 static const struct of_device_id of_dwc3_match[] = {
 	{
-		"synosys,dwc3",
+		"synopsys,dwc3",
 	},
 	{  }, /* Terminating Entry */
 };
