@@ -681,9 +681,7 @@ static int usbhsg_try_start(struct usbhs_priv *priv, u32 status)
 	 * - function
 	 * - usb module
 	 */
-	usbhs_sys_hispeed_ctrl(priv, 1);
 	usbhs_sys_function_ctrl(priv, 1);
-	usbhs_sys_usb_ctrl(priv, 1);
 
 	/*
 	 * enable irq callback
@@ -731,9 +729,7 @@ static int usbhsg_try_stop(struct usbhs_priv *priv, u32 status)
 	gpriv->gadget.speed = USB_SPEED_UNKNOWN;
 
 	/* disable sys */
-	usbhs_sys_hispeed_ctrl(priv, 0);
 	usbhs_sys_function_ctrl(priv, 0);
-	usbhs_sys_usb_ctrl(priv, 0);
 
 	usbhsg_pipe_disable(dcp);
 
@@ -751,53 +747,32 @@ static int usbhsg_gadget_start(struct usb_gadget *gadget,
 		struct usb_gadget_driver *driver)
 {
 	struct usbhsg_gpriv *gpriv = usbhsg_gadget_to_gpriv(gadget);
-	struct usbhs_priv *priv;
-	struct device *dev;
-	int ret;
+	struct usbhs_priv *priv = usbhsg_gpriv_to_priv(gpriv);
 
 	if (!driver		||
 	    !driver->setup	||
-	    driver->speed != USB_SPEED_HIGH)
+	    driver->max_speed < USB_SPEED_FULL)
 		return -EINVAL;
-
-	dev  = usbhsg_gpriv_to_dev(gpriv);
-	priv = usbhsg_gpriv_to_priv(gpriv);
 
 	/* first hook up the driver ... */
 	gpriv->driver = driver;
 	gpriv->gadget.dev.driver = &driver->driver;
 
-	ret = device_add(&gpriv->gadget.dev);
-	if (ret) {
-		dev_err(dev, "device_add error %d\n", ret);
-		goto add_fail;
-	}
-
 	return usbhsg_try_start(priv, USBHSG_STATUS_REGISTERD);
-
-add_fail:
-	gpriv->driver = NULL;
-	gpriv->gadget.dev.driver = NULL;
-
-	return ret;
 }
 
 static int usbhsg_gadget_stop(struct usb_gadget *gadget,
 		struct usb_gadget_driver *driver)
 {
 	struct usbhsg_gpriv *gpriv = usbhsg_gadget_to_gpriv(gadget);
-	struct usbhs_priv *priv;
-	struct device *dev;
+	struct usbhs_priv *priv = usbhsg_gpriv_to_priv(gpriv);
 
 	if (!driver		||
 	    !driver->unbind)
 		return -EINVAL;
 
-	dev  = usbhsg_gpriv_to_dev(gpriv);
-	priv = usbhsg_gpriv_to_priv(gpriv);
-
 	usbhsg_try_stop(priv, USBHSG_STATUS_REGISTERD);
-	device_del(&gpriv->gadget.dev);
+	gpriv->gadget.dev.driver = NULL;
 	gpriv->driver = NULL;
 
 	return 0;
@@ -827,6 +802,13 @@ static int usbhsg_start(struct usbhs_priv *priv)
 
 static int usbhsg_stop(struct usbhs_priv *priv)
 {
+	struct usbhsg_gpriv *gpriv = usbhsg_priv_to_gpriv(priv);
+
+	/* cable disconnect */
+	if (gpriv->driver &&
+	    gpriv->driver->disconnect)
+		gpriv->driver->disconnect(&gpriv->gadget);
+
 	return usbhsg_try_stop(priv, USBHSG_STATUS_STARTED);
 }
 
@@ -876,12 +858,14 @@ int usbhs_mod_gadget_probe(struct usbhs_priv *priv)
 	/*
 	 * init gadget
 	 */
-	device_initialize(&gpriv->gadget.dev);
 	dev_set_name(&gpriv->gadget.dev, "gadget");
 	gpriv->gadget.dev.parent	= dev;
 	gpriv->gadget.name		= "renesas_usbhs_udc";
 	gpriv->gadget.ops		= &usbhsg_gadget_ops;
-	gpriv->gadget.is_dualspeed	= 1;
+	gpriv->gadget.max_speed		= USB_SPEED_HIGH;
+	ret = device_register(&gpriv->gadget.dev);
+	if (ret < 0)
+		goto err_add_udc;
 
 	INIT_LIST_HEAD(&gpriv->gadget.ep_list);
 
@@ -912,12 +896,15 @@ int usbhs_mod_gadget_probe(struct usbhs_priv *priv)
 
 	ret = usb_add_gadget_udc(dev, &gpriv->gadget);
 	if (ret)
-		goto err_add_udc;
+		goto err_register;
 
 
 	dev_info(dev, "gadget probed\n");
 
 	return 0;
+
+err_register:
+	device_unregister(&gpriv->gadget.dev);
 err_add_udc:
 	kfree(gpriv->uep);
 
@@ -932,6 +919,8 @@ void usbhs_mod_gadget_remove(struct usbhs_priv *priv)
 	struct usbhsg_gpriv *gpriv = usbhsg_priv_to_gpriv(priv);
 
 	usb_del_gadget_udc(&gpriv->gadget);
+
+	device_unregister(&gpriv->gadget.dev);
 
 	usbhsg_controller_unregister(gpriv);
 

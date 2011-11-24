@@ -74,7 +74,6 @@ struct usbhsh_pipe_info {
 struct usbhsh_request {
 	struct urb		*urb;
 	struct usbhs_pkt	pkt;
-	struct list_head	ureq_link; /* see hpriv :: ureq_link_xxx */
 };
 
 struct usbhsh_device {
@@ -104,10 +103,6 @@ struct usbhsh_hpriv {
 	u32	port_stat;	/* USB_PORT_STAT_xxx */
 
 	struct completion	setup_ack_done;
-
-	/* see usbhsh_req_alloc/free */
-	struct list_head	ureq_link_active;
-	struct list_head	ureq_link_free;
 };
 
 
@@ -158,9 +153,12 @@ static const char usbhsh_hcd_name[] = "renesas_usbhs host";
 #define usbhsh_usbv_to_udev(d)	dev_get_drvdata(&(d)->dev)
 
 #define usbhsh_udev_to_usbv(h)	((h)->usbv)
+#define usbhsh_udev_is_used(h)	usbhsh_udev_to_usbv(h)
 
 #define usbhsh_pipe_info(p)	((p)->mod_private)
 
+#define usbhsh_device_parent(d)		(usbhsh_usbv_to_udev((d)->usbv->parent))
+#define usbhsh_device_hubport(d)	((d)->usbv->portnum)
 #define usbhsh_device_number(h, d)	((int)((d) - (h)->udev))
 #define usbhsh_device_nth(h, d)		((h)->udev + d)
 #define usbhsh_device0(h)		usbhsh_device_nth(h, 0)
@@ -170,38 +168,13 @@ static const char usbhsh_hcd_name[] = "renesas_usbhs host";
 #define usbhsh_port_stat_clear(h, s)	((h)->port_stat &= ~(s))
 #define usbhsh_port_stat_get(h)		((h)->port_stat)
 
-#define usbhsh_pkt_to_req(p)	\
+#define usbhsh_pkt_to_ureq(p)	\
 	container_of((void *)p, struct usbhsh_request, pkt)
 
 /*
  *		req alloc/free
  */
-static void usbhsh_req_list_init(struct usbhsh_hpriv *hpriv)
-{
-	INIT_LIST_HEAD(&hpriv->ureq_link_active);
-	INIT_LIST_HEAD(&hpriv->ureq_link_free);
-}
-
-static void usbhsh_req_list_quit(struct usbhsh_hpriv *hpriv)
-{
-	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
-	struct device *dev = usbhsh_hcd_to_dev(hcd);
-	struct usbhsh_request *ureq, *next;
-
-	/* kfree all active ureq */
-	list_for_each_entry_safe(ureq, next,
-				 &hpriv->ureq_link_active,
-				 ureq_link) {
-		dev_err(dev, "active ureq (%p) is force freed\n", ureq);
-		kfree(ureq);
-	}
-
-	/* kfree all free ureq */
-	list_for_each_entry_safe(ureq, next, &hpriv->ureq_link_free, ureq_link)
-		kfree(ureq);
-}
-
-static struct usbhsh_request *usbhsh_req_alloc(struct usbhsh_hpriv *hpriv,
+static struct usbhsh_request *usbhsh_ureq_alloc(struct usbhsh_hpriv *hpriv,
 					       struct urb *urb,
 					       gfp_t mem_flags)
 {
@@ -209,66 +182,45 @@ static struct usbhsh_request *usbhsh_req_alloc(struct usbhsh_hpriv *hpriv,
 	struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
 	struct device *dev = usbhs_priv_to_dev(priv);
 
-	if (list_empty(&hpriv->ureq_link_free)) {
-		/*
-		 * create new one if there is no free ureq
-		 */
-		ureq = kzalloc(sizeof(struct usbhsh_request), mem_flags);
-		if (ureq)
-			INIT_LIST_HEAD(&ureq->ureq_link);
-	} else {
-		/*
-		 * reuse "free" ureq if exist
-		 */
-		ureq = list_entry(hpriv->ureq_link_free.next,
-				  struct usbhsh_request,
-				  ureq_link);
-		if (ureq)
-			list_del_init(&ureq->ureq_link);
-	}
-
+	ureq = kzalloc(sizeof(struct usbhsh_request), mem_flags);
 	if (!ureq) {
 		dev_err(dev, "ureq alloc fail\n");
 		return NULL;
 	}
 
 	usbhs_pkt_init(&ureq->pkt);
-
-	/*
-	 * push it to "active" list
-	 */
-	list_add_tail(&ureq->ureq_link, &hpriv->ureq_link_active);
 	ureq->urb = urb;
+	usbhsh_urb_to_ureq(urb) = ureq;
 
 	return ureq;
 }
 
-static void usbhsh_req_free(struct usbhsh_hpriv *hpriv,
+static void usbhsh_ureq_free(struct usbhsh_hpriv *hpriv,
 			    struct usbhsh_request *ureq)
 {
-	struct usbhs_pkt *pkt = &ureq->pkt;
-
-	usbhs_pkt_init(pkt);
-
-	/*
-	 * removed from "active" list,
-	 * and push it to "free" list
-	 */
+	usbhsh_urb_to_ureq(ureq->urb) = NULL;
 	ureq->urb = NULL;
-	list_del_init(&ureq->ureq_link);
-	list_add_tail(&ureq->ureq_link, &hpriv->ureq_link_free);
+
+	kfree(ureq);
 }
 
 /*
  *		device control
  */
+static int usbhsh_connected_to_rhdev(struct usb_hcd *hcd,
+				     struct usbhsh_device *udev)
+{
+	struct usb_device *usbv = usbhsh_udev_to_usbv(udev);
+
+	return hcd->self.root_hub == usbv->parent;
+}
 
 static int usbhsh_device_has_endpoint(struct usbhsh_device *udev)
 {
 	return !list_empty(&udev->ep_list_head);
 }
 
-static struct usbhsh_device *usbhsh_device_alloc(struct usbhsh_hpriv *hpriv,
+static struct usbhsh_device *usbhsh_device_attach(struct usbhsh_hpriv *hpriv,
 						 struct urb *urb)
 {
 	struct usbhsh_device *udev = NULL;
@@ -276,50 +228,78 @@ static struct usbhsh_device *usbhsh_device_alloc(struct usbhsh_hpriv *hpriv,
 	struct device *dev = usbhsh_hcd_to_dev(hcd);
 	struct usb_device *usbv = usbhsh_urb_to_usbv(urb);
 	struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
+	unsigned long flags;
+	u16 upphub, hubport;
 	int i;
 
+	/********************  spin lock ********************/
+	usbhs_lock(priv, flags);
+
 	/*
-	 * device 0
+	 * find device
 	 */
 	if (0 == usb_pipedevice(urb->pipe)) {
+		/*
+		 * device0 is special case
+		 */
 		udev = usbhsh_device0(hpriv);
-		goto usbhsh_device_find;
+		if (usbhsh_udev_is_used(udev))
+			udev = NULL;
+	} else {
+		struct usbhsh_device *pos;
+
+		/*
+		 * find unused device
+		 */
+		usbhsh_for_each_udev(pos, hpriv, i) {
+			if (usbhsh_udev_is_used(pos))
+				continue;
+			udev = pos;
+			break;
+		}
 	}
 
-	/*
-	 * find unused device
-	 */
-	usbhsh_for_each_udev(udev, hpriv, i) {
-		if (usbhsh_udev_to_usbv(udev))
-			continue;
-		goto usbhsh_device_find;
+	if (udev) {
+		/*
+		 * usbhsh_usbv_to_udev()
+		 * usbhsh_udev_to_usbv()
+		 * will be enable
+		 */
+		dev_set_drvdata(&usbv->dev, udev);
+		udev->usbv = usbv;
 	}
 
-	dev_err(dev, "no free usbhsh_device\n");
+	usbhs_unlock(priv, flags);
+	/********************  spin unlock ******************/
 
-	return NULL;
+	if (!udev) {
+		dev_err(dev, "no free usbhsh_device\n");
+		return NULL;
+	}
 
-usbhsh_device_find:
 	if (usbhsh_device_has_endpoint(udev))
 		dev_warn(dev, "udev have old endpoint\n");
 
 	/* uep will be attached */
 	INIT_LIST_HEAD(&udev->ep_list_head);
 
-	/*
-	 * usbhsh_usbv_to_udev()
-	 * usbhsh_udev_to_usbv()
-	 * will be enable
-	 */
-	dev_set_drvdata(&usbv->dev, udev);
-	udev->usbv = usbv;
+	upphub	= 0;
+	hubport	= 0;
+	if (!usbhsh_connected_to_rhdev(hcd, udev)) {
+		/* if udev is not connected to rhdev, it means parent is Hub */
+		struct usbhsh_device *parent = usbhsh_device_parent(udev);
+
+		upphub	= usbhsh_device_number(hpriv, parent);
+		hubport	= usbhsh_device_hubport(udev);
+
+		dev_dbg(dev, "%s connecte to Hub [%d:%d](%p)\n", __func__,
+			upphub, hubport, parent);
+	}
 
 	/* set device config */
-	usbhs_set_device_speed(priv,
+	usbhs_set_device_config(priv,
 			       usbhsh_device_number(hpriv, udev),
-			       usbhsh_device_number(hpriv, udev),
-			       0, /* FIXME no parent */
-			       usbv->speed);
+			       upphub, hubport, usbv->speed);
 
 	dev_dbg(dev, "%s [%d](%p)\n", __func__,
 		usbhsh_device_number(hpriv, udev), udev);
@@ -327,18 +307,23 @@ usbhsh_device_find:
 	return udev;
 }
 
-static void usbhsh_device_free(struct usbhsh_hpriv *hpriv,
+static void usbhsh_device_detach(struct usbhsh_hpriv *hpriv,
 			       struct usbhsh_device *udev)
 {
 	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
+	struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
 	struct device *dev = usbhsh_hcd_to_dev(hcd);
 	struct usb_device *usbv = usbhsh_udev_to_usbv(udev);
+	unsigned long flags;
 
 	dev_dbg(dev, "%s [%d](%p)\n", __func__,
 		usbhsh_device_number(hpriv, udev), udev);
 
 	if (usbhsh_device_has_endpoint(udev))
 		dev_warn(dev, "udev still have endpoint\n");
+
+	/********************  spin lock ********************/
+	usbhs_lock(priv, flags);
 
 	/*
 	 * usbhsh_usbv_to_udev()
@@ -347,70 +332,87 @@ static void usbhsh_device_free(struct usbhsh_hpriv *hpriv,
 	 */
 	dev_set_drvdata(&usbv->dev, NULL);
 	udev->usbv = NULL;
+
+	usbhs_unlock(priv, flags);
+	/********************  spin unlock ******************/
 }
 
 /*
  *		end-point control
  */
-struct usbhsh_ep *usbhsh_endpoint_alloc(struct usbhsh_hpriv *hpriv,
-					struct usbhsh_device *udev,
-					struct usb_host_endpoint *ep,
-					int dir_in_req,
-					gfp_t mem_flags)
+static int usbhsh_endpoint_attach(struct usbhsh_hpriv *hpriv,
+				  struct urb *urb,
+				  gfp_t mem_flags)
 {
 	struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
-	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
+	struct usb_device *usbv = usbhsh_urb_to_usbv(urb);
+	struct usbhsh_device *udev = usbhsh_usbv_to_udev(usbv);
+	struct usb_host_endpoint *ep = urb->ep;
 	struct usbhsh_ep *uep;
 	struct usbhsh_pipe_info *info;
-	struct usbhs_pipe *pipe, *best_pipe;
-	struct device *dev = usbhsh_hcd_to_dev(hcd);
+	struct usbhs_pipe *best_pipe = NULL;
+	struct device *dev = usbhs_priv_to_dev(priv);
 	struct usb_endpoint_descriptor *desc = &ep->desc;
-	int type, i, dir_in;
-	unsigned int min_usr;
-
-	dir_in_req = !!dir_in_req;
+	unsigned long flags;
 
 	uep = kzalloc(sizeof(struct usbhsh_ep), mem_flags);
 	if (!uep) {
 		dev_err(dev, "usbhsh_ep alloc fail\n");
-		return NULL;
+		return -ENOMEM;
 	}
 
-	if (usb_endpoint_xfer_control(desc)) {
-		best_pipe = usbhsh_hpriv_to_dcp(hpriv);
-		goto usbhsh_endpoint_alloc_find_pipe;
-	}
+	/********************  spin lock ********************/
+	usbhs_lock(priv, flags);
 
 	/*
 	 * find best pipe for endpoint
 	 * see
 	 *	HARDWARE LIMITATION
 	 */
-	type = usb_endpoint_type(desc);
-	min_usr = ~0;
-	best_pipe = NULL;
-	usbhs_for_each_pipe(pipe, priv, i) {
-		if (!usbhs_pipe_type_is(pipe, type))
-			continue;
+	if (usb_endpoint_xfer_control(desc)) {
+		/* best pipe is DCP */
+		best_pipe = usbhsh_hpriv_to_dcp(hpriv);
+	} else {
+		struct usbhs_pipe *pipe;
+		unsigned int min_usr = ~0;
+		int dir_in_req = !!usb_pipein(urb->pipe);
+		int i, dir_in;
 
-		dir_in = !!usbhs_pipe_is_dir_in(pipe);
-		if (0 != (dir_in - dir_in_req))
-			continue;
+		usbhs_for_each_pipe(pipe, priv, i) {
+			if (!usbhs_pipe_type_is(pipe, usb_endpoint_type(desc)))
+				continue;
 
-		info = usbhsh_pipe_info(pipe);
+			dir_in = !!usbhs_pipe_is_dir_in(pipe);
+			if (0 != (dir_in - dir_in_req))
+				continue;
 
-		if (min_usr > info->usr_cnt) {
-			min_usr		= info->usr_cnt;
-			best_pipe	= pipe;
+			info = usbhsh_pipe_info(pipe);
+			if (min_usr > info->usr_cnt) {
+				min_usr		= info->usr_cnt;
+				best_pipe	= pipe;
+			}
 		}
 	}
+
+	if (best_pipe) {
+		/* update pipe user count */
+		info = usbhsh_pipe_info(best_pipe);
+		info->usr_cnt++;
+
+		/* init this endpoint, and attach it to udev */
+		INIT_LIST_HEAD(&uep->ep_list);
+		list_add_tail(&uep->ep_list, &udev->ep_list_head);
+	}
+
+	usbhs_unlock(priv, flags);
+	/********************  spin unlock ******************/
 
 	if (unlikely(!best_pipe)) {
 		dev_err(dev, "couldn't find best pipe\n");
 		kfree(uep);
-		return NULL;
+		return -EIO;
 	}
-usbhsh_endpoint_alloc_find_pipe:
+
 	/*
 	 * init uep
 	 */
@@ -420,18 +422,8 @@ usbhsh_endpoint_alloc_find_pipe:
 	usbhsh_ep_to_uep(ep)	= uep;
 
 	/*
-	 * update pipe user count
-	 */
-	info = usbhsh_pipe_info(best_pipe);
-	info->usr_cnt++;
-
-	/* init this endpoint, and attach it to udev */
-	INIT_LIST_HEAD(&uep->ep_list);
-	list_add_tail(&uep->ep_list, &udev->ep_list_head);
-
-	/*
 	 * usbhs_pipe_config_update() should be called after
-	 * usbhs_device_config()
+	 * usbhs_set_device_config()
 	 * see
 	 *  DCPMAXP/PIPEMAXP
 	 */
@@ -445,16 +437,17 @@ usbhsh_endpoint_alloc_find_pipe:
 		usbhsh_device_number(hpriv, udev),
 		usbhs_pipe_name(uep->pipe), uep);
 
-	return uep;
+	return 0;
 }
 
-void usbhsh_endpoint_free(struct usbhsh_hpriv *hpriv,
-			  struct usb_host_endpoint *ep)
+static void usbhsh_endpoint_detach(struct usbhsh_hpriv *hpriv,
+				   struct usb_host_endpoint *ep)
 {
 	struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
 	struct device *dev = usbhs_priv_to_dev(priv);
 	struct usbhsh_ep *uep = usbhsh_ep_to_uep(ep);
 	struct usbhsh_pipe_info *info;
+	unsigned long flags;
 
 	if (!uep)
 		return;
@@ -462,6 +455,9 @@ void usbhsh_endpoint_free(struct usbhsh_hpriv *hpriv,
 	dev_dbg(dev, "%s [%d-%s](%p)\n", __func__,
 		usbhsh_device_number(hpriv, usbhsh_uep_to_udev(uep)),
 		usbhs_pipe_name(uep->pipe), uep);
+
+	/********************  spin lock ********************/
+	usbhs_lock(priv, flags);
 
 	info = usbhsh_pipe_info(uep->pipe);
 	info->usr_cnt--;
@@ -472,6 +468,9 @@ void usbhsh_endpoint_free(struct usbhsh_hpriv *hpriv,
 	usbhsh_uep_to_udev(uep) = NULL;
 	usbhsh_ep_to_uep(ep) = NULL;
 
+	usbhs_unlock(priv, flags);
+	/********************  spin unlock ******************/
+
 	kfree(uep);
 }
 
@@ -480,7 +479,7 @@ void usbhsh_endpoint_free(struct usbhsh_hpriv *hpriv,
  */
 static void usbhsh_queue_done(struct usbhs_priv *priv, struct usbhs_pkt *pkt)
 {
-	struct usbhsh_request *ureq = usbhsh_pkt_to_req(pkt);
+	struct usbhsh_request *ureq = usbhsh_pkt_to_ureq(pkt);
 	struct usbhsh_hpriv *hpriv = usbhsh_priv_to_hpriv(priv);
 	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
 	struct urb *urb = ureq->urb;
@@ -494,26 +493,34 @@ static void usbhsh_queue_done(struct usbhs_priv *priv, struct usbhs_pkt *pkt)
 	}
 
 	urb->actual_length = pkt->actual;
-	usbhsh_req_free(hpriv, ureq);
-	usbhsh_urb_to_ureq(urb) = NULL;
+	usbhsh_ureq_free(hpriv, ureq);
 
 	usb_hcd_unlink_urb_from_ep(hcd, urb);
 	usb_hcd_giveback_urb(hcd, urb, 0);
 }
 
 static int usbhsh_queue_push(struct usb_hcd *hcd,
-			     struct usbhs_pipe *pipe,
-			     struct urb *urb)
+			     struct urb *urb,
+			     gfp_t mem_flags)
 {
-	struct usbhsh_request *ureq = usbhsh_urb_to_ureq(urb);
-	struct usbhs_pkt *pkt = &ureq->pkt;
+	struct usbhsh_hpriv *hpriv = usbhsh_hcd_to_hpriv(hcd);
+	struct usbhsh_ep *uep = usbhsh_ep_to_uep(urb->ep);
+	struct usbhs_pipe *pipe = usbhsh_uep_to_pipe(uep);
 	struct device *dev = usbhsh_hcd_to_dev(hcd);
+	struct usbhsh_request *ureq;
 	void *buf;
 	int len;
 
 	if (usb_pipeisoc(urb->pipe)) {
 		dev_err(dev, "pipe iso is not supported now\n");
 		return -EIO;
+	}
+
+	/* this ureq will be freed on usbhsh_queue_done() */
+	ureq = usbhsh_ureq_alloc(hpriv, urb, mem_flags);
+	if (unlikely(!ureq)) {
+		dev_err(dev, "ureq alloc fail\n");
+		return -ENOMEM;
 	}
 
 	if (usb_pipein(urb->pipe))
@@ -525,7 +532,7 @@ static int usbhsh_queue_push(struct usb_hcd *hcd,
 	len = urb->transfer_buffer_length - urb->actual_length;
 
 	dev_dbg(dev, "%s\n", __func__);
-	usbhs_pkt_push(pipe, pkt, usbhsh_queue_done,
+	usbhs_pkt_push(pipe, &ureq->pkt, usbhsh_queue_done,
 		       buf, len, (urb->transfer_flags & URB_ZERO_PACKET));
 	usbhs_pkt_start(pipe);
 
@@ -537,12 +544,12 @@ static int usbhsh_queue_push(struct usb_hcd *hcd,
  */
 static int usbhsh_is_request_address(struct urb *urb)
 {
-	struct usb_ctrlrequest *cmd;
+	struct usb_ctrlrequest *req;
 
-	cmd = (struct usb_ctrlrequest *)urb->setup_packet;
+	req = (struct usb_ctrlrequest *)urb->setup_packet;
 
-	if ((DeviceOutRequest    == cmd->bRequestType << 8) &&
-	    (USB_REQ_SET_ADDRESS == cmd->bRequest))
+	if ((DeviceOutRequest    == req->bRequestType << 8) &&
+	    (USB_REQ_SET_ADDRESS == req->bRequest))
 		return 1;
 	else
 		return 0;
@@ -595,82 +602,79 @@ static void usbhsh_setup_stage_packet_push(struct usbhsh_hpriv *hpriv,
 static void usbhsh_data_stage_packet_done(struct usbhs_priv *priv,
 					  struct usbhs_pkt *pkt)
 {
-	struct usbhsh_request *ureq = usbhsh_pkt_to_req(pkt);
+	struct usbhsh_request *ureq = usbhsh_pkt_to_ureq(pkt);
 	struct usbhsh_hpriv *hpriv = usbhsh_priv_to_hpriv(priv);
-	struct urb *urb = ureq->urb;
 
 	/* this ureq was connected to urb when usbhsh_urb_enqueue()  */
 
-	usbhsh_req_free(hpriv, ureq);
-	usbhsh_urb_to_ureq(urb) = NULL;
+	usbhsh_ureq_free(hpriv, ureq);
 }
 
-static void usbhsh_data_stage_packet_push(struct usbhsh_hpriv *hpriv,
-					  struct urb *urb,
-					  struct usbhs_pipe *pipe)
+static int usbhsh_data_stage_packet_push(struct usbhsh_hpriv *hpriv,
+					 struct urb *urb,
+					 struct usbhs_pipe *pipe,
+					 gfp_t mem_flags)
+
 {
 	struct usbhsh_request *ureq;
-	struct usbhs_pkt *pkt;
 
-	/*
-	 * FIXME
-	 *
-	 * data stage uses ureq which is connected to urb
-	 * see usbhsh_urb_enqueue() :: alloc new request.
-	 * it will be freed in usbhsh_data_stage_packet_done()
-	 */
-	ureq	= usbhsh_urb_to_ureq(urb);
-	pkt	= &ureq->pkt;
+	/* this ureq will be freed on usbhsh_data_stage_packet_done() */
+	ureq = usbhsh_ureq_alloc(hpriv, urb, mem_flags);
+	if (unlikely(!ureq))
+		return -ENOMEM;
 
 	if (usb_pipein(urb->pipe))
 		pipe->handler = &usbhs_dcp_data_stage_in_handler;
 	else
 		pipe->handler = &usbhs_dcp_data_stage_out_handler;
 
-	usbhs_pkt_push(pipe, pkt,
+	usbhs_pkt_push(pipe, &ureq->pkt,
 		       usbhsh_data_stage_packet_done,
 		       urb->transfer_buffer,
 		       urb->transfer_buffer_length,
 		       (urb->transfer_flags & URB_ZERO_PACKET));
+
+	return 0;
 }
 
 /*
  *		DCP status stage
  */
-static void usbhsh_status_stage_packet_push(struct usbhsh_hpriv *hpriv,
+static int usbhsh_status_stage_packet_push(struct usbhsh_hpriv *hpriv,
 					    struct urb *urb,
-					    struct usbhs_pipe *pipe)
+					    struct usbhs_pipe *pipe,
+					    gfp_t mem_flags)
 {
 	struct usbhsh_request *ureq;
-	struct usbhs_pkt *pkt;
 
-	/*
-	 * FIXME
-	 *
-	 * status stage uses allocated ureq.
-	 * it will be freed on usbhsh_queue_done()
-	 */
-	ureq	= usbhsh_req_alloc(hpriv, urb, GFP_KERNEL);
-	pkt	= &ureq->pkt;
+	/* This ureq will be freed on usbhsh_queue_done() */
+	ureq = usbhsh_ureq_alloc(hpriv, urb, mem_flags);
+	if (unlikely(!ureq))
+		return -ENOMEM;
 
 	if (usb_pipein(urb->pipe))
 		pipe->handler = &usbhs_dcp_status_stage_in_handler;
 	else
 		pipe->handler = &usbhs_dcp_status_stage_out_handler;
 
-	usbhs_pkt_push(pipe, pkt,
+	usbhs_pkt_push(pipe, &ureq->pkt,
 		       usbhsh_queue_done,
 		       NULL,
 		       urb->transfer_buffer_length,
 		       0);
+
+	return 0;
 }
 
 static int usbhsh_dcp_queue_push(struct usb_hcd *hcd,
-				 struct usbhsh_hpriv *hpriv,
-				 struct usbhs_pipe *pipe,
-				 struct urb *urb)
+				 struct urb *urb,
+				 gfp_t mflags)
 {
+	struct usbhsh_hpriv *hpriv = usbhsh_hcd_to_hpriv(hcd);
+	struct usbhsh_ep *uep = usbhsh_ep_to_uep(urb->ep);
+	struct usbhs_pipe *pipe = usbhsh_uep_to_pipe(uep);
 	struct device *dev = usbhsh_hcd_to_dev(hcd);
+	int ret;
 
 	dev_dbg(dev, "%s\n", __func__);
 
@@ -686,13 +690,22 @@ static int usbhsh_dcp_queue_push(struct usb_hcd *hcd,
 	 *
 	 * It is pushed only when urb has buffer.
 	 */
-	if (urb->transfer_buffer_length)
-		usbhsh_data_stage_packet_push(hpriv, urb, pipe);
+	if (urb->transfer_buffer_length) {
+		ret = usbhsh_data_stage_packet_push(hpriv, urb, pipe, mflags);
+		if (ret < 0) {
+			dev_err(dev, "data stage failed\n");
+			return ret;
+		}
+	}
 
 	/*
 	 * status stage
 	 */
-	usbhsh_status_stage_packet_push(hpriv, urb, pipe);
+	ret = usbhsh_status_stage_packet_push(hpriv, urb, pipe, mflags);
+	if (ret < 0) {
+		dev_err(dev, "status stage failed\n");
+		return ret;
+	}
 
 	/*
 	 * start pushed packets
@@ -731,10 +744,7 @@ static int usbhsh_urb_enqueue(struct usb_hcd *hcd,
 	struct device *dev = usbhs_priv_to_dev(priv);
 	struct usb_device *usbv = usbhsh_urb_to_usbv(urb);
 	struct usb_host_endpoint *ep = urb->ep;
-	struct usbhsh_request *ureq;
-	struct usbhsh_device *udev, *new_udev = NULL;
-	struct usbhs_pipe *pipe;
-	struct usbhsh_ep *uep;
+	struct usbhsh_device *new_udev = NULL;
 	int is_dir_in = usb_pipein(urb->pipe);
 
 	int ret;
@@ -746,54 +756,36 @@ static int usbhsh_urb_enqueue(struct usb_hcd *hcd,
 		goto usbhsh_urb_enqueue_error_not_linked;
 
 	/*
-	 * get udev
+	 * attach udev if needed
 	 */
-	udev = usbhsh_usbv_to_udev(usbv);
-	if (!udev) {
-		new_udev = usbhsh_device_alloc(hpriv, urb);
+	if (!usbhsh_usbv_to_udev(usbv)) {
+		new_udev = usbhsh_device_attach(hpriv, urb);
 		if (!new_udev)
 			goto usbhsh_urb_enqueue_error_not_linked;
-
-		udev = new_udev;
 	}
 
 	/*
-	 * get uep
+	 * attach endpoint if needed
 	 */
-	uep = usbhsh_ep_to_uep(ep);
-	if (!uep) {
-		uep = usbhsh_endpoint_alloc(hpriv, udev, ep,
-					    is_dir_in, mem_flags);
-		if (!uep)
+	if (!usbhsh_ep_to_uep(ep)) {
+		ret = usbhsh_endpoint_attach(hpriv, urb, mem_flags);
+		if (ret < 0)
 			goto usbhsh_urb_enqueue_error_free_device;
 	}
-	pipe = usbhsh_uep_to_pipe(uep);
-
-	/*
-	 * alloc new request
-	 */
-	ureq = usbhsh_req_alloc(hpriv, urb, mem_flags);
-	if (unlikely(!ureq)) {
-		ret = -ENOMEM;
-		goto usbhsh_urb_enqueue_error_free_endpoint;
-	}
-	usbhsh_urb_to_ureq(urb) = ureq;
 
 	/*
 	 * push packet
 	 */
 	if (usb_pipecontrol(urb->pipe))
-		usbhsh_dcp_queue_push(hcd, hpriv, pipe, urb);
+		ret = usbhsh_dcp_queue_push(hcd, urb, mem_flags);
 	else
-		usbhsh_queue_push(hcd, pipe, urb);
+		ret = usbhsh_queue_push(hcd, urb, mem_flags);
 
-	return 0;
+	return ret;
 
-usbhsh_urb_enqueue_error_free_endpoint:
-	usbhsh_endpoint_free(hpriv, ep);
 usbhsh_urb_enqueue_error_free_device:
 	if (new_udev)
-		usbhsh_device_free(hpriv, new_udev);
+		usbhsh_device_detach(hpriv, new_udev);
 usbhsh_urb_enqueue_error_not_linked:
 
 	dev_dbg(dev, "%s error\n", __func__);
@@ -806,10 +798,8 @@ static int usbhsh_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 	struct usbhsh_hpriv *hpriv = usbhsh_hcd_to_hpriv(hcd);
 	struct usbhsh_request *ureq = usbhsh_urb_to_ureq(urb);
 
-	if (ureq) {
-		usbhsh_req_free(hpriv, ureq);
-		usbhsh_urb_to_ureq(urb) = NULL;
-	}
+	if (ureq)
+		usbhsh_ureq_free(hpriv, ureq);
 
 	return 0;
 }
@@ -823,7 +813,7 @@ static void usbhsh_endpoint_disable(struct usb_hcd *hcd,
 
 	/*
 	 * this function might be called manytimes by same hcd/ep
-	 * in-endpoitn == out-endpoint if ep == dcp.
+	 * in-endpoint == out-endpoint if ep == dcp.
 	 */
 	if (!uep)
 		return;
@@ -831,15 +821,14 @@ static void usbhsh_endpoint_disable(struct usb_hcd *hcd,
 	udev	= usbhsh_uep_to_udev(uep);
 	hpriv	= usbhsh_hcd_to_hpriv(hcd);
 
-	usbhsh_endpoint_free(hpriv, ep);
-	ep->hcpriv = NULL;
+	usbhsh_endpoint_detach(hpriv, ep);
 
 	/*
 	 * if there is no endpoint,
 	 * free device
 	 */
 	if (!usbhsh_device_has_endpoint(udev))
-		usbhsh_device_free(hpriv, udev);
+		usbhsh_device_detach(hpriv, udev);
 }
 
 static int usbhsh_hub_status_data(struct usb_hcd *hcd, char *buf)
@@ -1205,9 +1194,7 @@ static int usbhsh_start(struct usbhs_priv *priv)
 	 * - host
 	 * - usb module
 	 */
-	usbhs_sys_hispeed_ctrl(priv, 1);
 	usbhs_sys_host_ctrl(priv, 1);
-	usbhs_sys_usb_ctrl(priv, 1);
 
 	/*
 	 * enable irq callback
@@ -1242,9 +1229,7 @@ static int usbhsh_stop(struct usbhs_priv *priv)
 	usb_remove_hcd(hcd);
 
 	/* disable sys */
-	usbhs_sys_hispeed_ctrl(priv, 0);
 	usbhs_sys_host_ctrl(priv, 0);
-	usbhs_sys_usb_ctrl(priv, 0);
 
 	dev_dbg(dev, "quit host\n");
 
@@ -1295,7 +1280,6 @@ int usbhs_mod_host_probe(struct usbhs_priv *priv)
 	hpriv->mod.stop		= usbhsh_stop;
 	hpriv->pipe_info	= pipe_info;
 	hpriv->pipe_size	= pipe_size;
-	usbhsh_req_list_init(hpriv);
 	usbhsh_port_stat_init(hpriv);
 
 	/* init all device */
@@ -1318,8 +1302,6 @@ int usbhs_mod_host_remove(struct usbhs_priv *priv)
 {
 	struct usbhsh_hpriv *hpriv = usbhsh_priv_to_hpriv(priv);
 	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
-
-	usbhsh_req_list_quit(hpriv);
 
 	usb_put_hcd(hcd);
 
