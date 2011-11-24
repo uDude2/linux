@@ -745,8 +745,9 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 	dep->flags |= DWC3_EP_BUSY;
 	dep->res_trans_idx = dwc3_gadget_ep_get_transfer_index(dwc,
 			dep->number);
-	if (!dep->res_trans_idx)
-		printk_once(KERN_ERR "%s() res_trans_idx is invalid\n", __func__);
+
+	WARN_ON_ONCE(!dep->res_trans_idx);
+
 	return 0;
 }
 
@@ -1155,35 +1156,9 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 	dwc->gadget_driver	= driver;
 	dwc->gadget.dev.driver	= &driver->driver;
 
-	reg = dwc3_readl(dwc->regs, DWC3_GCTL);
-
-	reg &= ~DWC3_GCTL_SCALEDOWN(3);
-	reg &= ~DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_OTG);
-	reg &= ~DWC3_GCTL_DISSCRAMBLE;
-	reg |= DWC3_GCTL_PRTCAPDIR(DWC3_GCTL_PRTCAP_DEVICE);
-
-	switch (DWC3_GHWPARAMS1_EN_PWROPT(dwc->hwparams.hwparams0)) {
-	case DWC3_GHWPARAMS1_EN_PWROPT_CLK:
-		reg &= ~DWC3_GCTL_DSBLCLKGTNG;
-		break;
-	default:
-		dev_dbg(dwc->dev, "No power optimization available\n");
-	}
-
-	/*
-	 * WORKAROUND: DWC3 revisions <1.90a have a bug
-	 * when The device fails to connect at SuperSpeed
-	 * and falls back to high-speed mode which causes
-	 * the device to enter in a Connect/Disconnect loop
-	 */
-	if (dwc->revision < DWC3_REVISION_190A)
-		reg |= DWC3_GCTL_U2RSTECN;
-
-	dwc3_writel(dwc->regs, DWC3_GCTL, reg);
-
 	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
 	reg &= ~(DWC3_DCFG_SPEED_MASK);
-	reg |= DWC3_DCFG_SUPERSPEED;
+	reg |= dwc->maximum_speed;
 	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
 	dwc->start_config_issued = false;
@@ -1290,11 +1265,10 @@ static int __devinit dwc3_gadget_init_endpoints(struct dwc3 *dwc)
 					&dwc->gadget.ep_list);
 
 			ret = dwc3_alloc_trb_pool(dep);
-			if (ret) {
-				dev_err(dwc->dev, "%s: failed to allocate TRB pool\n", dep->name);
+			if (ret)
 				return ret;
-			}
 		}
+
 		INIT_LIST_HEAD(&dep->request_list);
 		INIT_LIST_HEAD(&dep->req_queued);
 	}
@@ -1334,8 +1308,10 @@ static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
 
 	do {
 		req = next_request(&dep->req_queued);
-		if (!req)
-			break;
+		if (!req) {
+			WARN_ON_ONCE(1);
+			return 1;
+		}
 
 		dwc3_trb_to_nat(req->trb, &trb);
 
@@ -1399,6 +1375,31 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	if (clean_busy) {
 		dep->flags &= ~DWC3_EP_BUSY;
 		dep->res_trans_idx = 0;
+	}
+
+	/*
+	 * WORKAROUND: This is the 2nd half of U1/U2 -> U0 workaround.
+	 * See dwc3_gadget_linksts_change_interrupt() for 1st half.
+	 */
+	if (dwc->revision < DWC3_REVISION_183A) {
+		u32		reg;
+		int		i;
+
+		for (i = 0; i < DWC3_ENDPOINTS_NUM; i++) {
+			struct dwc3_ep	*dep = dwc->eps[i];
+
+			if (!(dep->flags & DWC3_EP_ENABLED))
+				continue;
+
+			if (!list_empty(&dep->req_queued))
+				return;
+		}
+
+		reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+		reg |= dwc->u1u2;
+		dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+		dwc->u1u2 = 0;
 	}
 }
 
@@ -1639,6 +1640,7 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	dwc->start_config_issued = false;
 
 	dwc->gadget.speed = USB_SPEED_UNKNOWN;
+	dwc->setup_packet_pending = false;
 }
 
 static void dwc3_gadget_usb3_phy_power(struct dwc3 *dwc, int on)
@@ -1674,6 +1676,37 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	u32			reg;
 
 	dev_vdbg(dwc->dev, "%s\n", __func__);
+
+	/*
+	 * WORKAROUND: DWC3 revisions <1.88a have an issue which
+	 * would cause a missing Disconnect Event if there's a
+	 * pending Setup Packet in the FIFO.
+	 *
+	 * There's no suggested workaround on the official Bug
+	 * report, which states that "unless the driver/application
+	 * is doing any special handling of a disconnect event,
+	 * there is no functional issue".
+	 *
+	 * Unfortunately, it turns out that we _do_ some special
+	 * handling of a disconnect event, namely complete all
+	 * pending transfers, notify gadget driver of the
+	 * disconnection, and so on.
+	 *
+	 * Our suggested workaround is to follow the Disconnect
+	 * Event steps here, instead, based on a setup_packet_pending
+	 * flag. Such flag gets set whenever we have a XferNotReady
+	 * event on EP0 and gets cleared on XferComplete for the
+	 * same endpoint.
+	 *
+	 * Refers to:
+	 *
+	 * STAR#9000466709: RTL: Device : Disconnect event not
+	 * generated if setup packet pending in FIFO
+	 */
+	if (dwc->revision < DWC3_REVISION_188A) {
+		if (dwc->setup_packet_pending)
+			dwc3_gadget_disconnect_interrupt(dwc);
+	}
 
 	/* Enable PHYs */
 	dwc3_gadget_usb2_phy_power(dwc, true);
@@ -1755,6 +1788,22 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	switch (speed) {
 	case DWC3_DCFG_SUPERSPEED:
+		/*
+		 * WORKAROUND: DWC3 revisions <1.90a have an issue which
+		 * would cause a missing USB3 Reset event.
+		 *
+		 * In such situations, we should force a USB3 Reset
+		 * event by calling our dwc3_gadget_reset_interrupt()
+		 * routine.
+		 *
+		 * Refers to:
+		 *
+		 * STAR#9000483510: RTL: SS : USB3 reset event may
+		 * not be generated always when the link enters poll
+		 */
+		if (dwc->revision < DWC3_REVISION_190A)
+			dwc3_gadget_reset_interrupt(dwc);
+
 		dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
 		dwc->gadget.ep0->maxpacket = 512;
 		dwc->gadget.speed = USB_SPEED_SUPER;
@@ -1818,8 +1867,55 @@ static void dwc3_gadget_wakeup_interrupt(struct dwc3 *dwc)
 static void dwc3_gadget_linksts_change_interrupt(struct dwc3 *dwc,
 		unsigned int evtinfo)
 {
-	/*  The fith bit says SuperSpeed yes or no. */
-	dwc->link_state = evtinfo & DWC3_LINK_STATE_MASK;
+	enum dwc3_link_state	next = evtinfo & DWC3_LINK_STATE_MASK;
+
+	/*
+	 * WORKAROUND: DWC3 Revisions <1.83a have an issue which, depending
+	 * on the link partner, the USB session might do multiple entry/exit
+	 * of low power states before a transfer takes place.
+	 *
+	 * Due to this problem, we might experience lower throughput. The
+	 * suggested workaround is to disable DCTL[12:9] bits if we're
+	 * transitioning from U1/U2 to U0 and enable those bits again
+	 * after a transfer completes and there are no pending transfers
+	 * on any of the enabled endpoints.
+	 *
+	 * This is the first half of that workaround.
+	 *
+	 * Refers to:
+	 *
+	 * STAR#9000446952: RTL: Device SS : if U1/U2 ->U0 takes >128us
+	 * core send LGO_Ux entering U0
+	 */
+	if (dwc->revision < DWC3_REVISION_183A) {
+		if (next == DWC3_LINK_STATE_U0) {
+			u32	u1u2;
+			u32	reg;
+
+			switch (dwc->link_state) {
+			case DWC3_LINK_STATE_U1:
+			case DWC3_LINK_STATE_U2:
+				reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+				u1u2 = reg & (DWC3_DCTL_INITU2ENA
+						| DWC3_DCTL_ACCEPTU2ENA
+						| DWC3_DCTL_INITU1ENA
+						| DWC3_DCTL_ACCEPTU1ENA);
+
+				if (!dwc->u1u2)
+					dwc->u1u2 = reg & u1u2;
+
+				reg &= ~u1u2;
+
+				dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+				break;
+			default:
+				/* do nothing */
+				break;
+			}
+		}
+	}
+
+	dwc->link_state = next;
 
 	dev_vdbg(dwc->dev, "%s link %d\n", __func__, dwc->link_state);
 }
@@ -1925,7 +2021,7 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 
 	spin_lock(&dwc->lock);
 
-	for (i = 0; i < DWC3_EVENT_BUFFERS_NUM; i++) {
+	for (i = 0; i < dwc->num_event_buffers; i++) {
 		irqreturn_t status;
 
 		status = dwc3_process_event_buf(dwc, i);
@@ -2076,16 +2172,12 @@ err0:
 void dwc3_gadget_exit(struct dwc3 *dwc)
 {
 	int			irq;
-	int			i;
 
 	usb_del_gadget_udc(&dwc->gadget);
 	irq = platform_get_irq(to_platform_device(dwc->dev), 0);
 
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, 0x00);
 	free_irq(irq, dwc);
-
-	for (i = 0; i < ARRAY_SIZE(dwc->eps); i++)
-		__dwc3_gadget_ep_disable(dwc->eps[i]);
 
 	dwc3_gadget_free_endpoints(dwc);
 
