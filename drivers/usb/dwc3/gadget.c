@@ -1789,12 +1789,12 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	switch (speed) {
 	case DWC3_DCFG_SUPERSPEED:
 		/*
-		 * WORKAROUND: DWC3 revisions <1.90a have an isue which
+		 * WORKAROUND: DWC3 revisions <1.90a have an issue which
 		 * would cause a missing USB3 Reset event.
 		 *
 		 * In such situations, we should force a USB3 Reset
 		 * event by calling our dwc3_gadget_reset_interrupt()
-		 * routing.
+		 * routine.
 		 *
 		 * Refers to:
 		 *

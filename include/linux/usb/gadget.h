@@ -548,7 +548,14 @@ static inline struct usb_gadget *dev_to_usb_gadget(struct device *dev)
  */
 static inline int gadget_is_dualspeed(struct usb_gadget *g)
 {
-	return g->max_speed >= USB_SPEED_HIGH;
+#ifdef CONFIG_USB_GADGET_DUALSPEED
+	/* runtime test would check "g->max_speed" ... that might be
+	 * useful to work around hardware bugs, but is mostly pointless
+	 */
+	return 1;
+#else
+	return 0;
+#endif
 }
 
 /**
@@ -558,7 +565,15 @@ static inline int gadget_is_dualspeed(struct usb_gadget *g)
  */
 static inline int gadget_is_superspeed(struct usb_gadget *g)
 {
-	return g->max_speed >= USB_SPEED_SUPER;
+#ifdef CONFIG_USB_GADGET_SUPERSPEED
+	/*
+	 * runtime test would check "g->max_speed" ... that might be
+	 * useful to work around hardware bugs, but is mostly pointless
+	 */
+	return 1;
+#else
+	return 0;
+#endif
 }
 
 /**
