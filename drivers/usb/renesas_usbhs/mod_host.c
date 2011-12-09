@@ -799,6 +799,9 @@ static int usbhsh_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 {
 	struct usbhsh_hpriv *hpriv = usbhsh_hcd_to_hpriv(hcd);
 	struct usbhsh_request *ureq = usbhsh_urb_to_ureq(urb);
+	int ret;
+
+	ret = usb_hcd_check_unlink_urb(hcd, urb, status);
 
 	if (ureq) {
 		struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
@@ -808,7 +811,7 @@ static int usbhsh_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 		usbhsh_queue_done(priv, pkt);
 	}
 
-	return 0;
+	return ret;
 }
 
 static void usbhsh_endpoint_disable(struct usb_hcd *hcd,
@@ -1121,6 +1124,24 @@ static int usbhsh_irq_setup_err(struct usbhs_priv *priv,
 	return 0;
 }
 
+static int usbhsh_irq_common(struct usbhs_priv *priv)
+{
+	struct usbhsh_hpriv *hpriv = usbhsh_priv_to_hpriv(priv);
+	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
+
+	/*
+	 * renesas_usbhs driver is not using usb host
+	 * common driver. so, this flags-setting is needed by itself.
+	 * see
+	 *	usb_hcd_check_unlink_urb()
+	 *	usb_hcd_irq()
+	 */
+
+	set_bit(HCD_FLAG_SAW_IRQ, &hcd->flags);
+
+	return 0;
+}
+
 /*
  *		module start/stop
  */
@@ -1210,6 +1231,7 @@ static int usbhsh_start(struct usbhs_priv *priv)
 	mod->irq_dtch		= usbhsh_irq_dtch;
 	mod->irq_sack		= usbhsh_irq_setup_ack;
 	mod->irq_sign		= usbhsh_irq_setup_err;
+	mod->irq_common		= usbhsh_irq_common;
 	usbhs_irq_callback_update(priv, mod);
 
 	dev_dbg(dev, "start host\n");
