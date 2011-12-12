@@ -377,23 +377,20 @@ static int __devexit dwc3_omap_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static const struct of_device_id of_dwc3_match[] = {
+static const struct of_device_id of_dwc3_matach[] = {
 	{
-		"ti,omap5430-dwc3"
-	},
-	{
-		"ti,omap5-dwc3"
+		"ti,dwc3",
 	},
 	{ },
 };
-MODULE_DEVICE_TABLE(of, of_dwc3_match);
+MODULE_DEVICE_TABLE(of, of_dwc3_matach);
 
 static struct platform_driver dwc3_omap_driver = {
 	.probe		= dwc3_omap_probe,
 	.remove		= __devexit_p(dwc3_omap_remove),
 	.driver		= {
 		.name	= "omap-dwc3",
-		.of_match_table	= of_dwc3_match,
+		.of_match_table	= of_dwc3_matach,
 	},
 };
 
