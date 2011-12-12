@@ -770,7 +770,7 @@ b_host:
 	 */
 	if (int_usb & MUSB_INTR_RESET) {
 		handled = IRQ_HANDLED;
-		if (is_host_capable() && (devctl & MUSB_DEVCTL_HM) != 0) {
+		if ((devctl & MUSB_DEVCTL_HM) != 0) {
 			/*
 			 * Looks like non-HS BABBLE can be ignored, but
 			 * HS BABBLE is an error condition. For HS the solution
@@ -784,7 +784,7 @@ b_host:
 				ERR("Stopping host session -- babble\n");
 				musb_writeb(musb->mregs, MUSB_DEVCTL, 0);
 			}
-		} else if (is_peripheral_capable()) {
+		} else {
 			dev_dbg(musb->controller, "BUS RESET as %s\n",
 				otg_state_string(musb->xceiv->state));
 			switch (musb->xceiv->state) {
@@ -1432,7 +1432,7 @@ static int __init musb_core_init(u16 musb_type, struct musb *musb)
 		struct musb_hw_ep	*hw_ep = musb->endpoints + i;
 
 		hw_ep->fifo = MUSB_FIFO_OFFSET(i) + mbase;
-#ifdef CONFIG_USB_MUSB_TUSB6010
+#if defined(CONFIG_USB_MUSB_TUSB6010) || defined (CONFIG_USB_MUSB_TUSB6010_MODULE)
 		hw_ep->fifo_async = musb->async + 0x400 + MUSB_FIFO_OFFSET(i);
 		hw_ep->fifo_sync = musb->sync + 0x400 + MUSB_FIFO_OFFSET(i);
 		hw_ep->fifo_sync_va =
@@ -1549,13 +1549,10 @@ irqreturn_t musb_interrupt(struct musb *musb)
 			/* musb_ep_select(musb->mregs, ep_num); */
 			/* REVISIT just retval = ep->rx_irq(...) */
 			retval = IRQ_HANDLED;
-			if (devctl & MUSB_DEVCTL_HM) {
-				if (is_host_capable())
-					musb_host_rx(musb, ep_num);
-			} else {
-				if (is_peripheral_capable())
-					musb_g_rx(musb, ep_num);
-			}
+			if (devctl & MUSB_DEVCTL_HM)
+				musb_host_rx(musb, ep_num);
+			else
+				musb_g_rx(musb, ep_num);
 		}
 
 		reg >>= 1;
@@ -1570,13 +1567,10 @@ irqreturn_t musb_interrupt(struct musb *musb)
 			/* musb_ep_select(musb->mregs, ep_num); */
 			/* REVISIT just retval |= ep->tx_irq(...) */
 			retval = IRQ_HANDLED;
-			if (devctl & MUSB_DEVCTL_HM) {
-				if (is_host_capable())
-					musb_host_tx(musb, ep_num);
-			} else {
-				if (is_peripheral_capable())
-					musb_g_tx(musb, ep_num);
-			}
+			if (devctl & MUSB_DEVCTL_HM)
+				musb_host_tx(musb, ep_num);
+			else
+				musb_g_tx(musb, ep_num);
 		}
 		reg >>= 1;
 		ep_num++;
@@ -1613,24 +1607,19 @@ void musb_dma_completion(struct musb *musb, u8 epnum, u8 transmit)
 		/* endpoints 1..15 */
 		if (transmit) {
 			if (devctl & MUSB_DEVCTL_HM) {
-				if (is_host_capable())
-					musb_host_tx(musb, epnum);
-			} else {
-				if (is_peripheral_capable())
-					musb_g_tx(musb, epnum);
-			}
+				musb_host_tx(musb, epnum);
+			else
+				musb_g_tx(musb, epnum);
 		} else {
 			/* receive */
-			if (devctl & MUSB_DEVCTL_HM) {
-				if (is_host_capable())
-					musb_host_rx(musb, epnum);
-			} else {
-				if (is_peripheral_capable())
-					musb_g_rx(musb, epnum);
-			}
+			if (devctl & MUSB_DEVCTL_HM)
+				musb_host_rx(musb, epnum);
+			else
+				musb_g_rx(musb, epnum);
 		}
 	}
 }
+EXPORT_SYMBOL_GPL(musb_dma_completion);
 
 #else
 #define use_dma			0
@@ -2158,6 +2147,7 @@ static void musb_save_context(struct musb *musb)
 		if (!epio)
 			continue;
 
+		musb_writeb(musb_base, MUSB_INDEX, i);
 		musb->context.index_regs[i].txmaxp =
 			musb_readw(epio, MUSB_TXMAXP);
 		musb->context.index_regs[i].txcsr =
@@ -2233,6 +2223,7 @@ static void musb_restore_context(struct musb *musb)
 		if (!epio)
 			continue;
 
+		musb_writeb(musb_base, MUSB_INDEX, i);
 		musb_writew(epio, MUSB_TXMAXP,
 			musb->context.index_regs[i].txmaxp);
 		musb_writew(epio, MUSB_TXCSR,
