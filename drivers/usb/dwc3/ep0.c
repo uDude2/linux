@@ -681,7 +681,12 @@ static void dwc3_ep0_do_control_data(struct dwc3 *dwc,
 				DWC3_TRBCTL_CONTROL_DATA);
 	} else if ((req->request.length % dep->endpoint.maxpacket)
 			&& (event->endpoint_number == 0)) {
-		dwc3_map_buffer_to_dma(req);
+		ret = usb_gadget_map_request(&dwc->gadget, &req->request,
+				event->endpoint_number);
+		if (ret) {
+			dev_dbg(dwc->dev, "failed to map request\n");
+			return;
+		}
 
 		WARN_ON(req->request.length > dep->endpoint.maxpacket);
 
@@ -696,7 +701,12 @@ static void dwc3_ep0_do_control_data(struct dwc3 *dwc,
 				dwc->ep0_bounce_addr, dep->endpoint.maxpacket,
 				DWC3_TRBCTL_CONTROL_DATA);
 	} else {
-		dwc3_map_buffer_to_dma(req);
+		ret = usb_gadget_map_request(&dwc->gadget, &req->request,
+				event->endpoint_number);
+		if (ret) {
+			dev_dbg(dwc->dev, "failed to map request\n");
+			return;
+		}
 
 		ret = dwc3_ep0_start_trans(dwc, event->endpoint_number,
 				req->request.dma, req->request.length,
