@@ -673,7 +673,7 @@ static void sudmac_free_channel(struct r8a66597 *r8a66597,
 	if (!r8a66597_is_sudmac(r8a66597))
 		return;
 
-	usb_gadget_map_request(&r8a66597->gadget, &req->req, ep->dma->dir);
+	usb_gadget_unmap_request(&r8a66597->gadget, &req->req, ep->dma->dir);
 
 	r8a66597_bclr(r8a66597, DREQE, ep->fifosel);
 	r8a66597_change_curpipe(r8a66597, 0, 0, ep->fifosel);

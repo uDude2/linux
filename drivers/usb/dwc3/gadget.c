@@ -512,7 +512,7 @@ static void dwc3_gadget_ep_free_request(struct usb_ep *ep,
 	kfree(req);
 }
 
-/*
+/**
  * dwc3_prepare_one_trb - setup one TRB from one request
  * @dep: endpoint for which this request is prepared
  * @req: dwc3_request pointer
@@ -1736,6 +1736,9 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 		if (dwc->setup_packet_pending)
 			dwc3_gadget_disconnect_interrupt(dwc);
 	}
+
+	/* after reset -> Default State */
+	dwc->dev_state = DWC3_DEFAULT_STATE;
 
 	/* Enable PHYs */
 	dwc3_gadget_usb2_phy_power(dwc, true);

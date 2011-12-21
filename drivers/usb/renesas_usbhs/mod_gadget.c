@@ -173,15 +173,24 @@ static int usbhsg_dma_map_ctrl(struct usbhs_pkt *pkt, int map)
 	struct usbhsg_uep *uep = usbhsg_pipe_to_uep(pipe);
 	struct usbhsg_gpriv *gpriv = usbhsg_uep_to_gpriv(uep);
 	enum dma_data_direction dir;
+	int ret = 0;
 
-	dir = usbhs_pipe_is_dir_in(pipe) ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
+	dir = usbhs_pipe_is_dir_host(pipe);
 
 	if (map) {
-		return usb_gadget_map_request(&gpriv->gadget, req, dir);
+		/* it can not use scatter/gather */
+		WARN_ON(req->num_sgs);
+
+		ret = usb_gadget_map_request(&gpriv->gadget, req, dir);
+		if (ret < 0)
+			return ret;
+
+		pkt->dma = req->dma;
 	} else {
 		usb_gadget_unmap_request(&gpriv->gadget, req, dir);
-		return 0;
 	}
+
+	return ret;
 }
 
 /*
@@ -610,8 +619,6 @@ static struct usb_request *usbhsg_ep_alloc_request(struct usb_ep *ep,
 		return NULL;
 
 	usbhs_pkt_init(usbhsg_ureq_to_pkt(ureq));
-
-	ureq->req.dma = DMA_ADDR_INVALID;
 
 	return &ureq->req;
 }

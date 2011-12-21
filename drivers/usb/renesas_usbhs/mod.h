@@ -83,9 +83,6 @@ struct usbhs_mod {
 	int (*irq_sack)(struct usbhs_priv *priv,
 			struct usbhs_irq_state *irq_state);
 
-	/* common */
-	int (*irq_common)(struct usbhs_priv *priv);
-
 	struct usbhs_priv *priv;
 };
 

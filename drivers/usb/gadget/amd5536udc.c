@@ -831,7 +831,8 @@ __acquires(ep->dev->lock)
 
 	dev = ep->dev;
 	/* unmap DMA */
-	usb_gadget_unmap_request(&dev->gadget, &req->req, ep->in);
+	if (ep->dma)
+		usb_gadget_unmap_request(&dev->gadget, &req->req, ep->in);
 
 	halted = ep->halted;
 	ep->halted = 1;
@@ -1084,7 +1085,7 @@ udc_queue(struct usb_ep *usbep, struct usb_request *usbreq, gfp_t gfp)
 	/* map dma (usually done before) */
 	if (ep->dma) {
 		VDBG(dev, "DMA map req %p\n", req);
-		retval = usb_gadget_map_request(&udc->gadget, &req->req, ep->in);
+		retval = usb_gadget_map_request(&udc->gadget, usbreq, ep->in);
 		if (retval)
 			return retval;
 	}

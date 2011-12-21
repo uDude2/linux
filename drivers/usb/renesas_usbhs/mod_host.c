@@ -633,7 +633,6 @@ static void usbhsh_queue_done(struct usbhs_priv *priv, struct usbhs_pkt *pkt)
 	struct usbhsh_hpriv *hpriv = usbhsh_priv_to_hpriv(priv);
 	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
 	struct urb *urb = ureq->urb;
-	struct usbhsh_ep *uep = usbhsh_ep_to_uep(urb->ep);
 	struct device *dev = usbhs_priv_to_dev(priv);
 	int status = 0;
 
@@ -651,7 +650,7 @@ static void usbhsh_queue_done(struct usbhs_priv *priv, struct usbhs_pkt *pkt)
 	usbhsh_ureq_free(hpriv, ureq);
 
 	usbhsh_endpoint_sequence_save(hpriv, urb, pkt);
-	usbhsh_pipe_detach(hpriv, uep);
+	usbhsh_pipe_detach(hpriv, usbhsh_ep_to_uep(urb->ep));
 
 	usb_hcd_unlink_urb_from_ep(hcd, urb);
 	usb_hcd_giveback_urb(hcd, urb, status);
@@ -1026,9 +1025,6 @@ static int usbhsh_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 {
 	struct usbhsh_hpriv *hpriv = usbhsh_hcd_to_hpriv(hcd);
 	struct usbhsh_request *ureq = usbhsh_urb_to_ureq(urb);
-	int ret;
-
-	ret = usb_hcd_check_unlink_urb(hcd, urb, status);
 
 	if (ureq) {
 		struct usbhs_priv *priv = usbhsh_hpriv_to_priv(hpriv);
@@ -1038,7 +1034,7 @@ static int usbhsh_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 		usbhsh_queue_done(priv, pkt);
 	}
 
-	return ret;
+	return 0;
 }
 
 static void usbhsh_endpoint_disable(struct usb_hcd *hcd,
@@ -1385,24 +1381,6 @@ static int usbhsh_irq_setup_err(struct usbhs_priv *priv,
 	return 0;
 }
 
-static int usbhsh_irq_common(struct usbhs_priv *priv)
-{
-	struct usbhsh_hpriv *hpriv = usbhsh_priv_to_hpriv(priv);
-	struct usb_hcd *hcd = usbhsh_hpriv_to_hcd(hpriv);
-
-	/*
-	 * renesas_usbhs driver is not using usb host
-	 * common driver. so, this flags-setting is needed by itself.
-	 * see
-	 *	usb_hcd_check_unlink_urb()
-	 *	usb_hcd_irq()
-	 */
-
-	set_bit(HCD_FLAG_SAW_IRQ, &hcd->flags);
-
-	return 0;
-}
-
 /*
  *		module start/stop
  */
@@ -1490,7 +1468,6 @@ static int usbhsh_start(struct usbhs_priv *priv)
 	mod->irq_dtch		= usbhsh_irq_dtch;
 	mod->irq_sack		= usbhsh_irq_setup_ack;
 	mod->irq_sign		= usbhsh_irq_setup_err;
-	mod->irq_common		= usbhsh_irq_common;
 	usbhs_irq_callback_update(priv, mod);
 
 	dev_dbg(dev, "start host\n");
@@ -1539,6 +1516,7 @@ int usbhs_mod_host_probe(struct usbhs_priv *priv)
 		return -ENOMEM;
 	}
 	hcd->has_tt = 1; /* for low/full speed */
+
 	/*
 	 * CAUTION
 	 *

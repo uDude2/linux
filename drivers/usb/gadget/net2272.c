@@ -385,8 +385,8 @@ net2272_done(struct net2272_ep *ep, struct net2272_request *req, int status)
 		status = req->req.status;
 
 	dev = ep->dev;
-	if (use_dma)
-		usb_gadget_map_request(&dev->gadget, &req->req,
+	if (use_dma && ep->dma)
+		usb_gadget_unmap_request(&dev->gadget, &req->req,
 				ep->is_in);
 
 	if (status && status != -ESHUTDOWN)
@@ -848,7 +848,7 @@ net2272_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 
 	/* set up dma mapping in case the caller didn't */
 	if (use_dma && ep->dma) {
-		status = usb_gadget_map_request(&dev->gadget, &req->req,
+		status = usb_gadget_map_request(&dev->gadget, _req,
 				ep->is_in);
 		if (status)
 			return status;

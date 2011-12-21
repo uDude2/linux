@@ -953,10 +953,10 @@ static inline void usb_free_descriptors(struct usb_descriptor_header **v)
 /* utility to simplify map/unmap of usb_requests to/from DMA */
 
 extern int usb_gadget_map_request(struct usb_gadget *gadget,
-		struct usb_request *req, int direction);
+		struct usb_request *req, int is_in);
 
 extern void usb_gadget_unmap_request(struct usb_gadget *gadget,
-		struct usb_request *req, int direction);
+		struct usb_request *req, int is_in);
 
 /*-------------------------------------------------------------------------*/
 

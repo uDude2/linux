@@ -293,9 +293,6 @@ static irqreturn_t usbhs_interrupt(int irq, void *data)
 	if (irq_state.intsts1 & SACK)
 		usbhs_mod_call(priv, irq_sack, priv, &irq_state);
 
-	/* common */
-	usbhs_mod_call(priv, irq_common, priv);
-
 	return IRQ_HANDLED;
 }
 
