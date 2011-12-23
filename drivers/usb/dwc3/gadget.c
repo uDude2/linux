@@ -88,7 +88,7 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 			req->request.length, status);
 
 	spin_unlock(&dwc->lock);
-	req->request.complete(&req->dep->endpoint, &req->request);
+	req->request.complete(&dep->endpoint, &req->request);
 	spin_lock(&dwc->lock);
 }
 
@@ -2094,9 +2094,8 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 		goto err1;
 	}
 
-	dwc->setup_buf = dma_alloc_coherent(dwc->dev,
-			sizeof(*dwc->setup_buf) * 2,
-			&dwc->setup_buf_addr, GFP_KERNEL);
+	dwc->setup_buf = kzalloc(sizeof(*dwc->setup_buf) * 2,
+			GFP_KERNEL);
 	if (!dwc->setup_buf) {
 		dev_err(dwc->dev, "failed to allocate setup buffer\n");
 		ret = -ENOMEM;
@@ -2187,8 +2186,7 @@ err4:
 			dwc->ep0_bounce_addr);
 
 err3:
-	dma_free_coherent(dwc->dev, sizeof(*dwc->setup_buf) * 2,
-			dwc->setup_buf, dwc->setup_buf_addr);
+	kfree(dwc->setup_buf);
 
 err2:
 	dma_free_coherent(dwc->dev, sizeof(*dwc->ep0_trb),
@@ -2217,8 +2215,7 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 	dma_free_coherent(dwc->dev, 512, dwc->ep0_bounce,
 			dwc->ep0_bounce_addr);
 
-	dma_free_coherent(dwc->dev, sizeof(*dwc->setup_buf) * 2,
-			dwc->setup_buf, dwc->setup_buf_addr);
+	kfree(dwc->setup_buf);
 
 	dma_free_coherent(dwc->dev, sizeof(*dwc->ep0_trb),
 			dwc->ep0_trb, dwc->ep0_trb_addr);
