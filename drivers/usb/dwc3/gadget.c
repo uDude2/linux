@@ -54,6 +54,75 @@
 #include "gadget.h"
 #include "io.h"
 
+/**
+ * dwc3_gadget_set_test_mode - Enables USB2 Test Modes
+ * @dwc: pointer to our context structure
+ * @mode: the mode to set (J, K SE0 NAK, Force Enable)
+ *
+ * Caller should take care of locking. This function will
+ * return 0 on success or -EINVAL if wrong Test Selector
+ * is passed
+ */
+int dwc3_gadget_set_test_mode(struct dwc3 *dwc, int mode)
+{
+	u32		reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg &= ~DWC3_DCTL_TSTCTRL_MASK;
+
+	switch (mode) {
+	case TEST_J:
+	case TEST_K:
+	case TEST_SE0_NAK:
+	case TEST_PACKET:
+	case TEST_FORCE_EN:
+		reg |= mode << 1;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+	return 0;
+}
+
+/**
+ * dwc3_gadget_set_link_state - Sets USB Link to a particular State
+ * @dwc: pointer to our context structure
+ * @state: the state to put link into
+ *
+ * Caller should take care of locking. This function will
+ * return 0 on success or -EINVAL.
+ */
+int dwc3_gadget_set_link_state(struct dwc3 *dwc, enum dwc3_link_state state)
+{
+	int		retries = 100;
+	u32		reg;
+
+	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg &= ~DWC3_DCTL_ULSTCHNGREQ_MASK;
+
+	/* set requested state */
+	reg |= DWC3_DCTL_ULSTCHNGREQ(state);
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+	/* wait for a change in DSTS */
+	while (--retries) {
+		reg = dwc3_readl(dwc->regs, DWC3_DSTS);
+
+		/* in HS, means ON */
+		if (DWC3_DSTS_USBLNKST(reg) == state)
+			return 0;
+
+		usleep_range(500, 1500);
+	}
+
+	dev_vdbg(dwc->dev, "link state change request timed out\n");
+
+	return -ETIMEDOUT;
+}
+
 void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 		int status)
 {
@@ -1066,17 +1135,11 @@ static int dwc3_gadget_wakeup(struct usb_gadget *g)
 		goto out;
 	}
 
-	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-
-	/*
-	 * Switch link state to Recovery. In HS/FS/LS this means
-	 * RemoteWakeup Request
-	 */
-	reg |= DWC3_DCTL_ULSTCHNG_RECOVERY;
-	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
-
-	/* wait for at least 2000us */
-	usleep_range(2000, 2500);
+	ret = dwc3_gadget_set_link_state(dwc, DWC3_LINK_STATE_RECOV);
+	if (ret < 0) {
+		dev_err(dwc->dev, "failed to put link in Recovery\n");
+		goto out;
+	}
 
 	/* write zeroes to Link Change Request */
 	reg &= ~DWC3_DCTL_ULSTCHNGREQ_MASK;
