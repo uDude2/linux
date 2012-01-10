@@ -54,6 +54,8 @@
 #include "gadget.h"
 #include "io.h"
 
+#define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
+
 /**
  * dwc3_gadget_set_test_mode - Enables USB2 Test Modes
  * @dwc: pointer to our context structure
@@ -123,6 +125,68 @@ int dwc3_gadget_set_link_state(struct dwc3 *dwc, enum dwc3_link_state state)
 	return -ETIMEDOUT;
 }
 
+void dwc3_map_buffer_to_dma(struct dwc3_request *req)
+{
+	struct dwc3			*dwc = req->dep->dwc;
+
+	if (req->request.length == 0) {
+		/* req->request.dma = dwc->setup_buf_addr; */
+		return;
+	}
+
+	if (req->request.num_sgs) {
+		int	mapped;
+
+		mapped = dma_map_sg(dwc->dev, req->request.sg,
+				req->request.num_sgs,
+				req->direction ? DMA_TO_DEVICE
+				: DMA_FROM_DEVICE);
+		if (mapped < 0) {
+			dev_err(dwc->dev, "failed to map SGs\n");
+			return;
+		}
+
+		req->request.num_mapped_sgs = mapped;
+		return;
+	}
+
+	if (req->request.dma == DMA_ADDR_INVALID) {
+		req->request.dma = dma_map_single(dwc->dev, req->request.buf,
+				req->request.length, req->direction
+				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+		req->mapped = true;
+	}
+}
+
+void dwc3_unmap_buffer_from_dma(struct dwc3_request *req)
+{
+	struct dwc3			*dwc = req->dep->dwc;
+
+	if (req->request.length == 0) {
+		req->request.dma = DMA_ADDR_INVALID;
+		return;
+	}
+
+	if (req->request.num_mapped_sgs) {
+		req->request.dma = DMA_ADDR_INVALID;
+		dma_unmap_sg(dwc->dev, req->request.sg,
+				req->request.num_sgs,
+				req->direction ? DMA_TO_DEVICE
+				: DMA_FROM_DEVICE);
+
+		req->request.num_mapped_sgs = 0;
+		return;
+	}
+
+	if (req->mapped) {
+		dma_unmap_single(dwc->dev, req->request.dma,
+				req->request.length, req->direction
+				? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+		req->mapped = 0;
+		req->request.dma = DMA_ADDR_INVALID;
+	}
+}
+
 void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 		int status)
 {
@@ -149,15 +213,14 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 	if (req->request.status == -EINPROGRESS)
 		req->request.status = status;
 
-	usb_gadget_unmap_request(&dwc->gadget, &req->request,
-			req->direction);
+	dwc3_unmap_buffer_from_dma(req);
 
 	dev_dbg(dwc->dev, "request %p from %s completed %d/%d ===> %d\n",
 			req, dep->name, req->request.actual,
 			req->request.length, status);
 
 	spin_unlock(&dwc->lock);
-	req->request.complete(&dep->endpoint, &req->request);
+	req->request.complete(&req->dep->endpoint, &req->request);
 	spin_lock(&dwc->lock);
 }
 
@@ -303,7 +366,8 @@ static int dwc3_gadget_set_ep_config(struct dwc3 *dwc, struct dwc3_ep *dep,
 	params.param1 = DWC3_DEPCFG_XFER_COMPLETE_EN
 		| DWC3_DEPCFG_XFER_NOT_READY_EN;
 
-	if (usb_ss_max_streams(comp_desc) && usb_endpoint_xfer_bulk(desc)) {
+	if (comp_desc && USB_SS_MAX_STREAMS(comp_desc->bmAttributes)
+			&& usb_endpoint_xfer_bulk(desc)) {
 		params.param1 |= DWC3_DEPCFG_STREAM_CAPABLE
 			| DWC3_DEPCFG_STREAM_EVENT_EN;
 		dep->stream_capable = true;
@@ -568,6 +632,7 @@ static struct usb_request *dwc3_gadget_ep_alloc_request(struct usb_ep *ep,
 
 	req->epnum	= dep->number;
 	req->dep	= dep;
+	req->request.dma = DMA_ADDR_INVALID;
 
 	return &req->request;
 }
@@ -826,8 +891,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 		 * here and stop, unmap, free and del each of the linked
 		 * requests instead of we do now.
 		 */
-		usb_gadget_unmap_request(&dwc->gadget, &req->request,
-				req->direction);
+		dwc3_unmap_buffer_from_dma(req);
 		list_del(&req->list);
 		return ret;
 	}
@@ -843,9 +907,6 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 
 static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 {
-	struct dwc3		*dwc = dep->dwc;
-	int			ret;
-
 	req->request.actual	= 0;
 	req->request.status	= -EINPROGRESS;
 	req->direction		= dep->direction;
@@ -863,11 +924,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	 * This will also avoid Host cancelling URBs due to too
 	 * many NACKs.
 	 */
-	ret = usb_gadget_map_request(&dwc->gadget, &req->request,
-			dep->direction);
-	if (ret)
-		return ret;
-
+	dwc3_map_buffer_to_dma(req);
 	list_add_tail(&req->list, &dep->request_list);
 
 	/*
@@ -2156,8 +2213,9 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 		goto err1;
 	}
 
-	dwc->setup_buf = kzalloc(sizeof(*dwc->setup_buf) * 2,
-			GFP_KERNEL);
+	dwc->setup_buf = dma_alloc_coherent(dwc->dev,
+			sizeof(*dwc->setup_buf) * 2,
+			&dwc->setup_buf_addr, GFP_KERNEL);
 	if (!dwc->setup_buf) {
 		dev_err(dwc->dev, "failed to allocate setup buffer\n");
 		ret = -ENOMEM;
@@ -2248,7 +2306,8 @@ err4:
 			dwc->ep0_bounce_addr);
 
 err3:
-	kfree(dwc->setup_buf);
+	dma_free_coherent(dwc->dev, sizeof(*dwc->setup_buf) * 2,
+			dwc->setup_buf, dwc->setup_buf_addr);
 
 err2:
 	dma_free_coherent(dwc->dev, sizeof(*dwc->ep0_trb),
@@ -2277,7 +2336,8 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 	dma_free_coherent(dwc->dev, 512, dwc->ep0_bounce,
 			dwc->ep0_bounce_addr);
 
-	kfree(dwc->setup_buf);
+	dma_free_coherent(dwc->dev, sizeof(*dwc->setup_buf) * 2,
+			dwc->setup_buf, dwc->setup_buf_addr);
 
 	dma_free_coherent(dwc->dev, sizeof(*dwc->ep0_trb),
 			dwc->ep0_trb, dwc->ep0_trb_addr);
