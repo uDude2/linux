@@ -117,12 +117,84 @@ int dwc3_gadget_set_link_state(struct dwc3 *dwc, enum dwc3_link_state state)
 		if (DWC3_DSTS_USBLNKST(reg) == state)
 			return 0;
 
-		usleep_range(500, 1500);
+		udelay(500);
 	}
 
 	dev_vdbg(dwc->dev, "link state change request timed out\n");
 
 	return -ETIMEDOUT;
+}
+
+/**
+ * dwc3_gadget_resize_tx_fifos - reallocate fifo spaces for current use-case
+ * @dwc: pointer to our context structure
+ *
+ * This function will a best effort FIFO allocation in order
+ * to improve FIFO usage and throughput, while still allowing
+ * us to enable as many endpoints as possible.
+ *
+ * Keep in mind that this operation will be highly dependent
+ * on the configured size for RAM1 - which contains TxFifo -,
+ * the amount of endpoints enabled on coreConsultant tool, and
+ * the width of the Master Bus.
+ *
+ * In the ideal world, we would always be able to satisfy the
+ * following equation:
+ *
+ * ((512 + 2 * MDWIDTH-Bytes) + (Number of IN Endpoints - 1) * \
+ * (3 * (1024 + MDWIDTH-Bytes) + MDWIDTH-Bytes)) / MDWIDTH-Bytes
+ *
+ * Unfortunately, due to many variables (Silicon die size, cost,
+ * targeted use-cases, etc) that's not always the case.
+ */
+int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc)
+{
+	int		last_fifo_depth = 0;
+	int		ram1_depth;
+	int		fifo_size;
+	int		mdwidth;
+	int		num;
+
+	ram1_depth = DWC3_RAM1_DEPTH(dwc->hwparams.hwparams7);
+	mdwidth = DWC3_MDWIDTH(dwc->hwparams.hwparams0);
+
+	/* MDWIDTH is represented in bits, we need it in bytes */
+	mdwidth >>= 3;
+
+	/*
+	 * FIXME For now we will only allocate 1 wMaxPacketSize space
+	 * for each enabled endpoint, later patches will come to
+	 * improve this algorithm so that we better use the internal
+	 * FIFO space
+	 */
+	for (num = 0; num < DWC3_ENDPOINTS_NUM; num++) {
+		struct dwc3_ep	*dep = dwc->eps[num];
+		int		fifo_number = dep->number >> 1;
+		int		tmp;
+
+		if (!(dep->number & 1))
+			continue;
+
+		if (!(dep->flags & DWC3_EP_ENABLED))
+			continue;
+
+		tmp = dep->endpoint.maxpacket;
+		tmp += mdwidth;
+		tmp += mdwidth;
+
+		fifo_size = DIV_ROUND_UP(tmp, mdwidth);
+		fifo_size |= (last_fifo_depth << 16);
+
+		dev_vdbg(dwc->dev, "%s: Fifo Addr %04x Size %d\n",
+				dep->name, last_fifo_depth, fifo_size & 0xffff);
+
+		dwc3_writel(dwc->regs, DWC3_GTXFIFOSIZ(fifo_number),
+				fifo_size);
+
+		last_fifo_depth += (fifo_size & 0xffff);
+	}
+
+	return 0;
 }
 
 void dwc3_map_buffer_to_dma(struct dwc3_request *req)
@@ -944,7 +1016,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 		int start_trans;
 
 		start_trans = 1;
-		if (usb_endpoint_xfer_isoc(dep->endpoint.desc) &&
+		if (usb_endpoint_xfer_isoc(dep->desc) &&
 				dep->flags & DWC3_EP_BUSY)
 			start_trans = 0;
 
@@ -1240,10 +1312,13 @@ static void dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on)
 	u32			timeout = 500;
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-	if (is_on)
-		reg |= DWC3_DCTL_RUN_STOP;
-	else
+	if (is_on) {
+		reg &= ~DWC3_DCTL_TRGTULST_MASK;
+		reg |= (DWC3_DCTL_RUN_STOP
+				| DWC3_DCTL_TRGTULST_RX_DET);
+	} else {
 		reg &= ~DWC3_DCTL_RUN_STOP;
+	}
 
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 
@@ -1658,7 +1733,8 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 			int ret;
 
 			dev_vdbg(dwc->dev, "%s: reason %s\n",
-					dep->name, event->status
+					dep->name, event->status &
+					DEPEVT_STATUS_TRANSFER_ACTIVE
 					? "Transfer Active"
 					: "Transfer Not Active");
 
