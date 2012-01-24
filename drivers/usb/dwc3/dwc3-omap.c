@@ -394,9 +394,9 @@ static struct platform_driver dwc3_omap_driver = {
 	},
 };
 
+module_platform_driver(dwc3_omap_driver);
+
 MODULE_ALIAS("platform:omap-dwc3");
 MODULE_AUTHOR("Felipe Balbi <balbi@ti.com>");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("DesignWare USB3 OMAP Glue Layer");
-
-module_platform_driver(dwc3_omap_driver);
