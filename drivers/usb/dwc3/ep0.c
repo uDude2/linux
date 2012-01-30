@@ -322,7 +322,6 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 	u32			recip;
 	u32			wValue;
 	u32			wIndex;
-	u32			reg;
 	int			ret;
 	u32			mode;
 
@@ -364,24 +363,12 @@ static int dwc3_ep0_handle_feature(struct dwc3 *dwc,
 				return -EINVAL;
 
 			mode = wIndex >> 8;
-			reg = dwc3_readl(dwc->regs, DWC3_DCTL);
-			reg &= ~DWC3_DCTL_TSTCTRL_MASK;
-
-			switch (mode) {
-			case TEST_J:
-			case TEST_K:
-			case TEST_SE0_NAK:
-			case TEST_PACKET:
-			case TEST_FORCE_EN:
-				reg |= mode << 1;
-				break;
-			default:
-				return -EINVAL;
+			ret = dwc3_gadget_set_test_mode(dwc, mode);
+			if (ret < 0) {
+				dev_dbg(dwc->dev, "Invalid Test #%d\n",
+						mode);
+				return ret;
 			}
-			dwc3_writel(dwc->regs, DWC3_DCTL, reg);
-			break;
-		default:
-			return -EINVAL;
 		}
 		break;
 
@@ -477,8 +464,11 @@ static int dwc3_ep0_set_config(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 	case DWC3_ADDRESS_STATE:
 		ret = dwc3_ep0_delegate_req(dwc, ctrl);
 		/* if the cfg matches and the cfg is non zero */
-		if (!ret && cfg)
+		if (cfg && (!ret || (ret == USB_GADGET_DELAYED_STATUS))) {
 			dwc->dev_state = DWC3_CONFIGURED_STATE;
+			dwc->resize_fifos = true;
+			dev_dbg(dwc->dev, "resize fifos flag SET\n");
+		}
 		break;
 
 	case DWC3_CONFIGURED_STATE:
@@ -726,6 +716,12 @@ static int dwc3_ep0_start_control_status(struct dwc3_ep *dep)
 static void dwc3_ep0_do_control_status(struct dwc3 *dwc, u32 epnum)
 {
 	struct dwc3_ep		*dep = dwc->eps[epnum];
+
+	if (dwc->resize_fifos) {
+		dev_dbg(dwc->dev, "starting to resize fifos\n");
+		dwc3_gadget_resize_tx_fifos(dwc);
+		dwc->resize_fifos = 0;
+	}
 
 	WARN_ON(dwc3_ep0_start_control_status(dep));
 }
