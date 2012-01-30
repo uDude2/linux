@@ -2073,7 +2073,7 @@ fail0:
 static u64	*orig_dma_mask;
 #endif
 
-static int __init musb_probe(struct platform_device *pdev)
+static int __devinit musb_probe(struct platform_device *pdev)
 {
 	struct device	*dev = &pdev->dev;
 	int		irq = platform_get_irq_byname(pdev, "mc");
@@ -2102,7 +2102,7 @@ static int __init musb_probe(struct platform_device *pdev)
 	return status;
 }
 
-static int __exit musb_remove(struct platform_device *pdev)
+static int __devexit musb_remove(struct platform_device *pdev)
 {
 	struct musb	*musb = dev_to_musb(&pdev->dev);
 	void __iomem	*ctrl_base = musb->ctrl_base;
@@ -2112,11 +2112,9 @@ static int __exit musb_remove(struct platform_device *pdev)
 	 *  - Peripheral mode: peripheral is deactivated (or never-activated)
 	 *  - OTG mode: both roles are deactivated (or never-activated)
 	 */
-	pm_runtime_get_sync(musb->controller);
 	musb_exit_debugfs(musb);
 	musb_shutdown(pdev);
 
-	pm_runtime_put(musb->controller);
 	musb_free(musb);
 	iounmap(ctrl_base);
 	device_init_wakeup(&pdev->dev, 0);
@@ -2364,7 +2362,8 @@ static struct platform_driver musb_driver = {
 		.owner		= THIS_MODULE,
 		.pm		= MUSB_DEV_PM_OPS,
 	},
-	.remove		= __exit_p(musb_remove),
+	.probe		= musb_probe,
+	.remove		= __devexit_p(musb_remove),
 	.shutdown	= musb_shutdown,
 };
 
@@ -2380,13 +2379,9 @@ static int __init musb_init(void)
 		", "
 		"otg (peripheral+host)",
 		musb_driver_name);
-	return platform_driver_probe(&musb_driver, musb_probe);
+	return platform_driver_register(&musb_driver);
 }
-
-/* make us init after usbcore and i2c (transceivers, regulators, etc)
- * and before usb gadget and host-side drivers start to register
- */
-fs_initcall(musb_init);
+module_init(musb_init);
 
 static void __exit musb_cleanup(void)
 {
