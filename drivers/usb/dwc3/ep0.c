@@ -597,6 +597,8 @@ static void dwc3_ep0_complete_req(struct dwc3 *dwc,
 	}
 
 	if (dwc->test_mode) {
+		int ret;
+
 		ret = dwc3_gadget_set_test_mode(dwc, dwc->test_mode_nr);
 		if (ret < 0) {
 			dev_dbg(dwc->dev, "Invalid Test #%d\n",
@@ -612,7 +614,6 @@ static void dwc3_ep0_complete_req(struct dwc3 *dwc,
 static void dwc3_ep0_xfer_complete(struct dwc3 *dwc,
 			const struct dwc3_event_depevt *event)
 {
-	int			ret;
 	struct dwc3_ep		*dep = dwc->eps[event->endpoint_number];
 
 	dep->flags &= ~DWC3_EP_BUSY;
