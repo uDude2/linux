@@ -514,7 +514,6 @@ static int dummy_enable(struct usb_ep *_ep,
 	}
 
 	_ep->maxpacket = max;
-	ep->desc = desc;
 	if (usb_ss_max_streams(_ep->comp_desc)) {
 		if (!usb_endpoint_xfer_bulk(desc)) {
 			dev_err(udc_dev(dum), "Can't enable stream support on "
@@ -523,6 +522,7 @@ static int dummy_enable(struct usb_ep *_ep,
 		}
 		ep->stream_en = 1;
 	}
+	ep->desc = desc;
 
 	dev_dbg(udc_dev(dum), "enabled %s (ep%d%s-%s) maxpacket %d stream %s\n",
 		_ep->name,
@@ -599,8 +599,10 @@ static void dummy_free_request(struct usb_ep *_ep, struct usb_request *_req)
 	struct dummy_ep		*ep;
 	struct dummy_request	*req;
 
+	if (!_ep || !_req)
+		return;
 	ep = usb_ep_to_dummy_ep(_ep);
-	if (!ep || !_req || (!ep->desc && _ep->name != ep0name))
+	if (!ep->desc && _ep->name != ep0name)
 		return;
 
 	req = usb_request_to_dummy_request(_req);
