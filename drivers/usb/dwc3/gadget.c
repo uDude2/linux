@@ -485,7 +485,7 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 
 		memset(&trb_link, 0, sizeof(trb_link));
 
-		/* Link TRB for ISOC. The HWO but is never reset */
+		/* Link TRB for ISOC. The HWO bit is never reset */
 		trb_st_hw = &dep->trb_pool[0];
 
 		trb_link = &dep->trb_pool[DWC3_TRB_NUM - 1];
@@ -581,16 +581,16 @@ static int dwc3_gadget_ep_enable(struct usb_ep *ep,
 
 	switch (usb_endpoint_type(desc)) {
 	case USB_ENDPOINT_XFER_CONTROL:
-		strncat(dep->name, "-control", sizeof(dep->name));
+		strlcat(dep->name, "-control", sizeof(dep->name));
 		break;
 	case USB_ENDPOINT_XFER_ISOC:
-		strncat(dep->name, "-isoc", sizeof(dep->name));
+		strlcat(dep->name, "-isoc", sizeof(dep->name));
 		break;
 	case USB_ENDPOINT_XFER_BULK:
-		strncat(dep->name, "-bulk", sizeof(dep->name));
+		strlcat(dep->name, "-bulk", sizeof(dep->name));
 		break;
 	case USB_ENDPOINT_XFER_INT:
-		strncat(dep->name, "-int", sizeof(dep->name));
+		strlcat(dep->name, "-int", sizeof(dep->name));
 		break;
 	default:
 		dev_err(dwc->dev, "invalid endpoint transfer type\n");
@@ -755,14 +755,15 @@ static void dwc3_prepare_one_trb(struct dwc3_ep *dep,
  * @dep: endpoint for which requests are being prepared
  * @starting: true if the endpoint is idle and no requests are queued.
  *
- * The functions goes through the requests list and setups TRBs for the
- * transfers. The functions returns once there are not more TRBs available or
- * it run out of requests.
+ * The function goes through the requests list and sets up TRBs for the
+ * transfers. The function returns once there are no more TRBs available or
+ * it runs out of requests.
  */
 static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 {
 	struct dwc3_request	*req, *n;
 	u32			trbs_left;
+	u32			max;
 	unsigned int		last_one = 0;
 
 	BUILD_BUG_ON_NOT_POWER_OF_2(DWC3_TRB_NUM);
@@ -770,9 +771,16 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 	/* the first request must not be queued */
 	trbs_left = (dep->busy_slot - dep->free_slot) & DWC3_TRB_MASK;
 
+	/* Can't wrap around on a non-isoc EP since there's no link TRB */
+	if (!usb_endpoint_xfer_isoc(dep->desc)) {
+		max = DWC3_TRB_NUM - (dep->free_slot & DWC3_TRB_MASK);
+		if (trbs_left > max)
+			trbs_left = max;
+	}
+
 	/*
-	 * if busy & slot are equal than it is either full or empty. If we are
-	 * starting to proceed requests then we are empty. Otherwise we ar
+	 * If busy & slot are equal than it is either full or empty. If we are
+	 * starting to process requests then we are empty. Otherwise we are
 	 * full and don't do anything
 	 */
 	if (!trbs_left) {
@@ -783,7 +791,7 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 		 * In case we start from scratch, we queue the ISOC requests
 		 * starting from slot 1. This is done because we use ring
 		 * buffer and have no LST bit to stop us. Instead, we place
-		 * IOC bit TRB_NUM/4. We try to avoid to having an interrupt
+		 * IOC bit every TRB_NUM/4. We try to avoid having an interrupt
 		 * after the first request so we start at slot 1 and have
 		 * 7 requests proceed before we hit the first IOC.
 		 * Other transfer types don't use the ring buffer and are
@@ -819,8 +827,8 @@ static void dwc3_prepare_trbs(struct dwc3_ep *dep, bool starting)
 				length = sg_dma_len(s);
 				dma = sg_dma_address(s);
 
-				if (i == (request->num_mapped_sgs - 1)
-						|| sg_is_last(s)) {
+				if (i == (request->num_mapped_sgs - 1) ||
+						sg_is_last(s)) {
 					last_one = true;
 					chain = false;
 				}
@@ -888,8 +896,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 		dwc3_prepare_trbs(dep, start_new);
 
 		/*
-		 * req points to the first request where HWO changed
-		 * from 0 to 1
+		 * req points to the first request where HWO changed from 0 to 1
 		 */
 		req = next_request(&dep->req_queued);
 	}
@@ -915,7 +922,7 @@ static int __dwc3_gadget_kick_transfer(struct dwc3_ep *dep, u16 cmd_param,
 		/*
 		 * FIXME we need to iterate over the list of requests
 		 * here and stop, unmap, free and del each of the linked
-		 * requests instead of we do now.
+		 * requests instead of what we do now.
 		 */
 		usb_gadget_unmap_request(&dwc->gadget, &req->request,
 				req->direction);
@@ -952,7 +959,7 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	 * particular token from the Host side.
 	 *
 	 * This will also avoid Host cancelling URBs due to too
-	 * many NACKs.
+	 * many NAKs.
 	 */
 	ret = usb_gadget_map_request(&dwc->gadget, &req->request,
 			dep->direction);
@@ -979,10 +986,10 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 
 		start_trans = 1;
 		if (usb_endpoint_xfer_isoc(dep->desc) &&
-				dep->flags & DWC3_EP_BUSY)
+				(dep->flags & DWC3_EP_BUSY))
 			start_trans = 0;
 
-		ret =  __dwc3_gadget_kick_transfer(dep, 0, start_trans);
+		ret = __dwc3_gadget_kick_transfer(dep, 0, start_trans);
 		if (ret && ret != -EBUSY) {
 			struct dwc3	*dwc = dep->dwc;
 
@@ -1236,10 +1243,10 @@ static int dwc3_gadget_wakeup(struct usb_gadget *g)
 	reg &= ~DWC3_DCTL_ULSTCHNGREQ_MASK;
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 
-	/* pool until Link State change to ON */
+	/* poll until Link State changes to ON */
 	timeout = jiffies + msecs_to_jiffies(100);
 
-	while (!(time_after(jiffies, timeout))) {
+	while (!time_after(jiffies, timeout)) {
 		reg = dwc3_readl(dwc->regs, DWC3_DSTS);
 
 		/* in HS, means ON */
@@ -1503,10 +1510,10 @@ static int dwc3_cleanup_done_reqs(struct dwc3 *dwc, struct dwc3_ep *dep,
 		if ((trb->ctrl & DWC3_TRB_CTRL_HWO) && status != -ESHUTDOWN)
 			/*
 			 * We continue despite the error. There is not much we
-			 * can do. If we don't clean in up we loop for ever. If
-			 * we skip the TRB than it gets overwritten reused after
-			 * a while since we use them in a ring buffer. a BUG()
-			 * would help. Lets hope that if this occures, someone
+			 * can do. If we don't clean it up we loop forever. If
+			 * we skip the TRB then it gets overwritten after a
+			 * while since we use them in a ring buffer. A BUG()
+			 * would help. Lets hope that if this occurs, someone
 			 * fixes the root cause instead of looking away :)
 			 */
 			dev_err(dwc->dev, "%s's TRB (%p) still owned by HW\n",
@@ -1559,7 +1566,7 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	if (event->status & DEPEVT_STATUS_BUSERR)
 		status = -ECONNRESET;
 
-	clean_busy =  dwc3_cleanup_done_reqs(dwc, dep, event, status);
+	clean_busy = dwc3_cleanup_done_reqs(dwc, dep, event, status);
 	if (clean_busy) {
 		dep->flags &= ~DWC3_EP_BUSY;
 		dep->res_trans_idx = 0;
@@ -1594,7 +1601,7 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 		struct dwc3_ep *dep, const struct dwc3_event_depevt *event)
 {
-	u32 uf;
+	u32 uf, mask;
 
 	if (list_empty(&dep->request_list)) {
 		dev_vdbg(dwc->dev, "ISOC ep %s run out for requests.\n",
@@ -1602,16 +1609,10 @@ static void dwc3_gadget_start_isoc(struct dwc3 *dwc,
 		return;
 	}
 
-	if (event->parameters) {
-		u32 mask;
-
-		mask = ~(dep->interval - 1);
-		uf = event->parameters & mask;
-		/* 4 micro frames in the future */
-		uf += dep->interval * 4;
-	} else {
-		uf = 0;
-	}
+	mask = ~(dep->interval - 1);
+	uf = event->parameters & mask;
+	/* 4 micro frames in the future */
+	uf += dep->interval * 4;
 
 	__dwc3_gadget_kick_transfer(dep, uf, 1);
 }
@@ -1623,8 +1624,8 @@ static void dwc3_process_ep_cmd_complete(struct dwc3_ep *dep,
 	struct dwc3_event_depevt mod_ev = *event;
 
 	/*
-	 * We were asked to remove one requests. It is possible that this
-	 * request and a few other were started together and have the same
+	 * We were asked to remove one request. It is possible that this
+	 * request and a few others were started together and have the same
 	 * transfer index. Since we stopped the complete endpoint we don't
 	 * know how many requests were already completed (and not yet)
 	 * reported and how could be done (later). We purge them all until
@@ -1633,7 +1634,7 @@ static void dwc3_process_ep_cmd_complete(struct dwc3_ep *dep,
 	mod_ev.status = DEPEVT_STATUS_LST;
 	dwc3_cleanup_done_reqs(dwc, dep, &mod_ev, -ESHUTDOWN);
 	dep->flags &= ~DWC3_EP_BUSY;
-	/* pending requets are ignored and are queued on XferNotReady */
+	/* pending requests are ignored and are queued on XferNotReady */
 }
 
 static void dwc3_ep_cmd_compl(struct dwc3_ep *dep,
@@ -2230,7 +2231,7 @@ static irqreturn_t dwc3_interrupt(int irq, void *_dwc)
 
 /**
  * dwc3_gadget_init - Initializes gadget related registers
- * @dwc: Pointer to out controller context structure
+ * @dwc: pointer to our controller context structure
  *
  * Returns 0 on success otherwise negative errno.
  */
