@@ -93,11 +93,11 @@ int dwc3_gadget_set_test_mode(struct dwc3 *dwc, int mode)
  * @state: the state to put link into
  *
  * Caller should take care of locking. This function will
- * return 0 on success or -EINVAL.
+ * return 0 on success or -ETIMEDOUT.
  */
 int dwc3_gadget_set_link_state(struct dwc3 *dwc, enum dwc3_link_state state)
 {
-	int		retries = 100;
+	int		retries = 10000;
 	u32		reg;
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
@@ -111,11 +111,10 @@ int dwc3_gadget_set_link_state(struct dwc3 *dwc, enum dwc3_link_state state)
 	while (--retries) {
 		reg = dwc3_readl(dwc->regs, DWC3_DSTS);
 
-		/* in HS, means ON */
 		if (DWC3_DSTS_USBLNKST(reg) == state)
 			return 0;
 
-		udelay(500);
+		udelay(5);
 	}
 
 	dev_vdbg(dwc->dev, "link state change request timed out\n");
@@ -1142,8 +1141,12 @@ out:
 static int dwc3_gadget_ep_set_wedge(struct usb_ep *ep)
 {
 	struct dwc3_ep			*dep = to_dwc3_ep(ep);
+	struct dwc3			*dwc = dep->dwc;
+	unsigned long			flags;
 
+	spin_lock_irqsave(&dwc->lock, flags);
 	dep->flags |= DWC3_EP_WEDGE;
+	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return dwc3_gadget_ep_set_halt(ep, 1);
 }
@@ -1269,8 +1272,11 @@ static int dwc3_gadget_set_selfpowered(struct usb_gadget *g,
 		int is_selfpowered)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
+	unsigned long		flags;
 
+	spin_lock_irqsave(&dwc->lock, flags);
 	dwc->is_selfpowered = !!is_selfpowered;
+	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return 0;
 }
@@ -1567,10 +1573,8 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 		status = -ECONNRESET;
 
 	clean_busy = dwc3_cleanup_done_reqs(dwc, dep, event, status);
-	if (clean_busy) {
+	if (clean_busy)
 		dep->flags &= ~DWC3_EP_BUSY;
-		dep->res_trans_idx = 0;
-	}
 
 	/*
 	 * WORKAROUND: This is the 2nd half of U1/U2 -> U0 workaround.
@@ -1675,6 +1679,8 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 
 	switch (event->endpoint_event) {
 	case DWC3_DEPEVT_XFERCOMPLETE:
+		dep->res_trans_idx = 0;
+
 		if (usb_endpoint_xfer_isoc(dep->desc)) {
 			dev_dbg(dwc->dev, "%s is an Isochronous endpoint\n",
 					dep->name);
