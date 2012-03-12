@@ -27,7 +27,6 @@ endif
 ##
 
 obj-$(CONFIG_USB_DWC3)		+= dwc3-omap.o
-obj-$(CONFIG_USB_DWC3)		+= dwc3-exynos.o
 
 ##
 # REVISIT Samsung Exynos platform needs the clk API which isn't
