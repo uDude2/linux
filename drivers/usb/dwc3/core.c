@@ -206,11 +206,11 @@ static void dwc3_free_event_buffers(struct dwc3 *dwc)
 
 	for (i = 0; i < dwc->num_event_buffers; i++) {
 		evt = dwc->ev_buffs[i];
-		if (evt) {
+		if (evt)
 			dwc3_free_one_event_buffer(dwc, evt);
-			dwc->ev_buffs[i] = NULL;
-		}
 	}
+
+	kfree(dwc->ev_buffs);
 }
 
 /**
@@ -597,19 +597,9 @@ static struct platform_driver dwc3_driver = {
 	},
 };
 
+module_platform_driver(dwc3_driver);
+
 MODULE_ALIAS("platform:dwc3");
 MODULE_AUTHOR("Felipe Balbi <balbi@ti.com>");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("DesignWare USB3 DRD Controller Driver");
-
-static int __devinit dwc3_init(void)
-{
-	return platform_driver_register(&dwc3_driver);
-}
-module_init(dwc3_init);
-
-static void __exit dwc3_exit(void)
-{
-	platform_driver_unregister(&dwc3_driver);
-}
-module_exit(dwc3_exit);
