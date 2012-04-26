@@ -574,7 +574,6 @@ static int dwc3_ep0_set_sel(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 
 static int dwc3_ep0_set_isoch_delay(struct dwc3 *dwc, struct usb_ctrlrequest *ctrl)
 {
-	struct dwc3_ep	*dep;
 	u16		wLength;
 	u16		wValue;
 	u16		wIndex;
