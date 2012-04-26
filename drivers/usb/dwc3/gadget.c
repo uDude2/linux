@@ -276,6 +276,33 @@ static const char *dwc3_gadget_ep_cmd_string(u8 cmd)
 	}
 }
 
+int dwc3_send_gadget_generic_command(struct dwc3 *dwc, int cmd, u32 param)
+{
+	u32		timeout = 500;
+	u32		reg;
+
+	dwc3_writel(dwc->regs, DWC3_DGCMDPAR, param);
+	dwc3_writel(dwc->regs, DWC3_DGCMD, cmd | DWC3_DGCMD_CMDACT);
+
+	do {
+		reg = dwc3_readl(dwc->regs, DWC3_DGCMD);
+		if (!(reg & DWC3_DGCMD_CMDACT)) {
+			dev_vdbg(dwc->dev, "Command Complete --> %d\n",
+					DWC3_DGCMD_STATUS(reg));
+			return 0;
+		}
+
+		/*
+		 * We can't sleep here, because it's also called from
+		 * interrupt context.
+		 */
+		timeout--;
+		if (!timeout)
+			return -ETIMEDOUT;
+		udelay(1);
+	} while (1);
+}
+
 int dwc3_send_gadget_ep_cmd(struct dwc3 *dwc, unsigned ep,
 		unsigned cmd, struct dwc3_gadget_ep_cmd_params *params)
 {
@@ -1932,6 +1959,7 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 
 	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
 	reg &= ~DWC3_DCTL_TSTCTRL_MASK;
+	reg &= ~(DWC3_DCTL_INITU1ENA | DWC3_DCTL_INITU2ENA);
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 	dwc->test_mode = false;
 
@@ -2279,8 +2307,7 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 		goto err1;
 	}
 
-	dwc->setup_buf = kzalloc(sizeof(*dwc->setup_buf) * 2,
-			GFP_KERNEL);
+	dwc->setup_buf = kzalloc(512, GFP_KERNEL);
 	if (!dwc->setup_buf) {
 		dev_err(dwc->dev, "failed to allocate setup buffer\n");
 		ret = -ENOMEM;
@@ -2328,6 +2355,14 @@ int __devinit dwc3_gadget_init(struct dwc3 *dwc)
 				irq, ret);
 		goto err5;
 	}
+
+	reg = dwc3_readl(dwc->regs, DWC3_DCFG);
+	reg |= DWC3_DCFG_LPM_CAP;
+	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
+
+	reg = dwc3_readl(dwc->regs, DWC3_DCTL);
+	reg |= DWC3_DCTL_ACCEPTU1ENA | DWC3_DCTL_ACCEPTU2ENA;
+	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 
 	/* Enable all but Start and End of Frame IRQs */
 	reg = (DWC3_DEVTEN_VNDRDEVTSTRCVEDEN |
