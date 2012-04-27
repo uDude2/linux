@@ -593,13 +593,13 @@ static int __dwc3_gadget_ep_enable(struct dwc3_ep *dep,
 	return 0;
 }
 
-static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum);
+static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum, bool force);
 static void dwc3_remove_requests(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
 	struct dwc3_request		*req;
 
 	if (!list_empty(&dep->req_queued))
-		dwc3_stop_active_transfer(dwc, dep->number);
+		dwc3_stop_active_transfer(dwc, dep->number, true);
 
 	while (!list_empty(&dep->request_list)) {
 		req = next_request(&dep->request_list);
@@ -1148,7 +1148,7 @@ static int dwc3_gadget_ep_dequeue(struct usb_ep *ep,
 		}
 		if (r == req) {
 			/* wait until it is processed */
-			dwc3_stop_active_transfer(dwc, dep->number);
+			dwc3_stop_active_transfer(dwc, dep->number, true);
 			goto out0;
 		}
 		dev_err(dwc->dev, "request %p was not queued to %s\n",
@@ -1888,7 +1888,7 @@ static void dwc3_disconnect_gadget(struct dwc3 *dwc)
 	}
 }
 
-static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum)
+static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum, bool force)
 {
 	struct dwc3_ep *dep;
 	struct dwc3_gadget_ep_cmd_params params;
@@ -1897,10 +1897,11 @@ static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum)
 
 	dep = dwc->eps[epnum];
 
-	WARN_ON(!dep->res_trans_idx);
-	if (dep->res_trans_idx) {
+	WARN_ON(epnum && !dep->res_trans_idx);
+	if (dep->res_trans_idx || !epnum) {
 		cmd = DWC3_DEPCMD_ENDTRANSFER;
-		cmd |= DWC3_DEPCMD_HIPRI_FORCERM | DWC3_DEPCMD_CMDIOC;
+		cmd |= force ? DWC3_DEPCMD_HIPRI_FORCERM : 0;
+		cmd |= DWC3_DEPCMD_CMDIOC;
 		cmd |= DWC3_DEPCMD_PARAM(dep->res_trans_idx);
 		memset(&params, 0, sizeof(params));
 		ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
