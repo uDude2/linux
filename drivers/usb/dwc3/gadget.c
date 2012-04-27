@@ -1428,14 +1428,47 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 	return 0;
 }
 
+static int __dwc3_gadget_start(struct dwc3 *dwc)
+{
+	struct dwc3_ep		*dep;
+	int			ret = 0;
+
+	dwc->start_config_issued = false;
+
+	dep = dwc->eps[0];
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, NULL);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
+		goto err0;
+	}
+
+	dep = dwc->eps[1];
+	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, NULL);
+	if (ret) {
+		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
+		goto err1;
+	}
+
+	/* begin to receive SETUP packets */
+	dwc->ep0state = EP0_SETUP_PHASE;
+	dwc3_ep0_out_start(dwc);
+
+	return 0;
+
+err1:
+	__dwc3_gadget_ep_disable(dwc->eps[0]);
+
+err0:
+	return ret;
+}
+
 static int dwc3_gadget_start(struct usb_gadget *g,
 		struct usb_gadget_driver *driver)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
-	struct dwc3_ep		*dep;
 	unsigned long		flags;
-	int			ret = 0;
 	u32			reg;
+	int			ret;
 
 	spin_lock_irqsave(&dwc->lock, flags);
 
@@ -1444,7 +1477,7 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 				dwc->gadget.name,
 				dwc->gadget_driver->driver.name);
 		ret = -EBUSY;
-		goto err0;
+		goto out;
 	}
 
 	dwc->gadget_driver	= driver;
@@ -1470,39 +1503,15 @@ static int dwc3_gadget_start(struct usb_gadget *g,
 		reg |= DWC3_DCFG_SUPERSPEED;
 	else
 		reg |= dwc->maximum_speed;
-	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
-	dwc->start_config_issued = false;
+	dwc3_writel(dwc->regs, DWC3_DCFG, reg);
 
 	/* Start with SuperSpeed Default */
 	dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
 
-	dep = dwc->eps[0];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, NULL);
-	if (ret) {
-		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err0;
-	}
+	ret = __dwc3_gadget_start(dwc);
 
-	dep = dwc->eps[1];
-	ret = __dwc3_gadget_ep_enable(dep, &dwc3_gadget_ep0_desc, NULL);
-	if (ret) {
-		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
-		goto err1;
-	}
-
-	/* begin to receive SETUP packets */
-	dwc->ep0state = EP0_SETUP_PHASE;
-	dwc3_ep0_out_start(dwc);
-
-	spin_unlock_irqrestore(&dwc->lock, flags);
-
-	return 0;
-
-err1:
-	__dwc3_gadget_ep_disable(dwc->eps[0]);
-
-err0:
+out:
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	return ret;
