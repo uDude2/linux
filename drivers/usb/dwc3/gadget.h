@@ -66,7 +66,12 @@ struct dwc3;
 #define DWC3_DEPCFG_FIFO_NUMBER(n)	((n) << 17)
 #define DWC3_DEPCFG_BURST_SIZE(n)	((n) << 22)
 #define DWC3_DEPCFG_DATA_SEQ_NUM(n)	((n) << 26)
+/* This applies for core versions earlier than 1.94a */
 #define DWC3_DEPCFG_IGN_SEQ_NUM		(1 << 31)
+/* These apply for core versions 1.94a and later */
+#define DWC3_DEPCFG_ACTION_INIT		(0 << 30)
+#define DWC3_DEPCFG_ACTION_RESTORE	(1 << 30)
+#define DWC3_DEPCFG_ACTION_MODIFY	(2 << 30)
 
 /* DEPXFERCFG parameter 0 */
 #define DWC3_DEPXFERCFG_NUM_XFER_RES(n)	((n) & 0xffff)
@@ -101,6 +106,7 @@ void dwc3_gadget_giveback(struct dwc3_ep *dep, struct dwc3_request *req,
 		int status);
 
 int dwc3_gadget_set_test_mode(struct dwc3 *dwc, int mode);
+int dwc3_gadget_get_link_state(struct dwc3 *dwc);
 int dwc3_gadget_set_link_state(struct dwc3 *dwc, enum dwc3_link_state state);
 
 void dwc3_ep0_interrupt(struct dwc3 *dwc,
