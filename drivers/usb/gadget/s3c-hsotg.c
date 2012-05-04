@@ -2191,8 +2191,6 @@ static void s3c_hsotg_irq_fifoempty(struct s3c_hsotg *hsotg, bool periodic)
 	}
 }
 
-static struct s3c_hsotg *our_hsotg;
-
 /* IRQ flags which will trigger a retry around the IRQ loop */
 #define IRQ_RETRY_MASK (S3C_GINTSTS_NPTxFEmp | \
 			S3C_GINTSTS_PTxFEmp |  \
@@ -2927,7 +2925,7 @@ static void s3c_hsotg_init(struct s3c_hsotg *hsotg)
 static int s3c_hsotg_udc_start(struct usb_gadget *gadget,
 			   struct usb_gadget_driver *driver)
 {
-	struct s3c_hsotg *hsotg = our_hsotg;
+	struct s3c_hsotg *hsotg = to_hsotg(gadget);
 	int ret;
 
 	if (!hsotg) {
@@ -2986,7 +2984,7 @@ err:
 static int s3c_hsotg_udc_stop(struct usb_gadget *gadget,
 			  struct usb_gadget_driver *driver)
 {
-	struct s3c_hsotg *hsotg = our_hsotg;
+	struct s3c_hsotg *hsotg = to_hsotg(gadget);
 	int ep;
 
 	if (!hsotg)
@@ -3621,7 +3619,6 @@ static int __devinit s3c_hsotg_probe(struct platform_device *pdev)
 
 	s3c_hsotg_dump(hsotg);
 
-	our_hsotg = hsotg;
 	return 0;
 
  err_ep_mem:
