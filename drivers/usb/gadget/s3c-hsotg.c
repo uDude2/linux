@@ -2819,8 +2819,8 @@ static void s3c_hsotg_init(struct s3c_hsotg *hsotg)
 	       hsotg->regs + S3C_GAHBCFG);
 }
 
-static int s3c_hsotg_start(struct usb_gadget_driver *driver,
-		int (*bind)(struct usb_gadget *))
+static int s3c_hsotg_udc_start(struct usb_gadget *gadget,
+			   struct usb_gadget_driver *driver)
 {
 	struct s3c_hsotg *hsotg = our_hsotg;
 	int ret;
@@ -2838,7 +2838,7 @@ static int s3c_hsotg_start(struct usb_gadget_driver *driver,
 	if (driver->max_speed < USB_SPEED_FULL)
 		dev_err(hsotg->dev, "%s: bad speed\n", __func__);
 
-	if (!bind || !driver->setup) {
+	if (!driver->setup) {
 		dev_err(hsotg->dev, "%s: missing entry points\n", __func__);
 		return -EINVAL;
 	}
@@ -2851,20 +2851,14 @@ static int s3c_hsotg_start(struct usb_gadget_driver *driver,
 	hsotg->gadget.dev.dma_mask = hsotg->dev->dma_mask;
 	hsotg->gadget.speed = USB_SPEED_UNKNOWN;
 
-	ret = device_add(&hsotg->gadget.dev);
+	ret = regulator_bulk_enable(ARRAY_SIZE(hsotg->supplies),
+				    hsotg->supplies);
 	if (ret) {
-		dev_err(hsotg->dev, "failed to register gadget device\n");
+		dev_err(hsotg->dev, "failed to enable supplies: %d\n", ret);
 		goto err;
 	}
 
-	ret = bind(&hsotg->gadget);
-	if (ret) {
-		dev_err(hsotg->dev, "failed bind %s\n", driver->driver.name);
-
-		hsotg->gadget.dev.driver = NULL;
-		hsotg->driver = NULL;
-		goto err;
-	}
+	s3c_hsotg_phy_enable(hsotg);
 
 	s3c_hsotg_core_init(hsotg);
 	hsotg->last_rst = jiffies;
@@ -2877,7 +2871,8 @@ err:
 	return ret;
 }
 
-static int s3c_hsotg_stop(struct usb_gadget_driver *driver)
+static int s3c_hsotg_udc_stop(struct usb_gadget *gadget,
+			  struct usb_gadget_driver *driver)
 {
 	struct s3c_hsotg *hsotg = our_hsotg;
 	int ep;
@@ -2892,13 +2887,12 @@ static int s3c_hsotg_stop(struct usb_gadget_driver *driver)
 	for (ep = 0; ep < hsotg->num_of_eps; ep++)
 		s3c_hsotg_ep_disable(&hsotg->eps[ep].ep);
 
-	call_gadget(hsotg, disconnect);
+	s3c_hsotg_phy_disable(hsotg);
+	regulator_bulk_disable(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
 
-	driver->unbind(&hsotg->gadget);
 	hsotg->driver = NULL;
 	hsotg->gadget.speed = USB_SPEED_UNKNOWN;
-
-	device_del(&hsotg->gadget.dev);
+	hsotg->gadget.dev.driver = NULL;
 
 	dev_info(hsotg->dev, "unregistered gadget driver '%s'\n",
 		 driver->driver.name);
@@ -2913,8 +2907,8 @@ static int s3c_hsotg_gadget_getframe(struct usb_gadget *gadget)
 
 static struct usb_gadget_ops s3c_hsotg_gadget_ops = {
 	.get_frame	= s3c_hsotg_gadget_getframe,
-	.start		= s3c_hsotg_start,
-	.stop		= s3c_hsotg_stop,
+	.udc_start		= s3c_hsotg_udc_start,
+	.udc_stop		= s3c_hsotg_udc_stop,
 };
 
 /**
@@ -3476,6 +3470,23 @@ static int __devinit s3c_hsotg_probe(struct platform_device *pdev)
 	for (epnum = 0; epnum < hsotg->num_of_eps; epnum++)
 		s3c_hsotg_initep(hsotg, &hsotg->eps[epnum], epnum);
 
+	/* disable power and clock */
+
+	ret = regulator_bulk_disable(ARRAY_SIZE(hsotg->supplies),
+				    hsotg->supplies);
+	if (ret) {
+		dev_err(hsotg->dev, "failed to disable supplies: %d\n", ret);
+		goto err_ep_mem;
+	}
+
+	s3c_hsotg_phy_disable(hsotg);
+
+	ret = device_add(&hsotg->gadget.dev);
+	if (ret) {
+		put_device(&hsotg->gadget.dev);
+		goto err_ep_mem;
+	}
+
 	ret = usb_add_gadget_udc(&pdev->dev, &hsotg->gadget);
 	if (ret)
 		goto err_ep_mem;
@@ -3493,7 +3504,6 @@ static int __devinit s3c_hsotg_probe(struct platform_device *pdev)
 err_supplies:
 	s3c_hsotg_phy_disable(hsotg);
 
-	regulator_bulk_disable(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
 	regulator_bulk_free(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
 
 	clk_disable(hsotg->clk);
@@ -3520,7 +3530,10 @@ static int __devexit s3c_hsotg_remove(struct platform_device *pdev)
 
 	s3c_hsotg_delete_debug(hsotg);
 
-	usb_gadget_unregister_driver(hsotg->driver);
+	if (hsotg->driver) {
+		/* should have been done already by driver model core */
+		usb_gadget_unregister_driver(hsotg->driver);
+	}
 
 	free_irq(hsotg->irq, hsotg);
 	iounmap(hsotg->regs);
@@ -3529,14 +3542,12 @@ static int __devexit s3c_hsotg_remove(struct platform_device *pdev)
 	kfree(hsotg->regs_res);
 
 	s3c_hsotg_phy_disable(hsotg);
-
-
-	regulator_bulk_disable(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
 	regulator_bulk_free(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
 
 	clk_disable(hsotg->clk);
 	clk_put(hsotg->clk);
 
+	device_unregister(&hsotg->gadget.dev);
 	kfree(hsotg);
 	return 0;
 }
