@@ -859,29 +859,6 @@ static void dwc3_ep0_do_control_data(struct dwc3 *dwc,
 	__dwc3_ep0_do_control_data(dwc, dep, req);
 }
 
-static void dwc3_ep0_do_control_data(struct dwc3 *dwc,
-		const struct dwc3_event_depevt *event)
-{
-	struct dwc3_ep		*dep;
-	struct dwc3_request	*req;
-
-	dep = dwc->eps[0];
-
-	if (list_empty(&dep->request_list)) {
-		dev_vdbg(dwc->dev, "pending request for EP0 Data phase\n");
-		dep->flags |= DWC3_EP_PENDING_REQUEST;
-
-		if (event->endpoint_number)
-			dep->flags |= DWC3_EP0_DIR_IN;
-		return;
-	}
-
-	req = next_request(&dep->request_list);
-	dep = dwc->eps[event->endpoint_number];
-
-	__dwc3_ep0_do_control_data(dwc, dep, req);
-}
-
 static int dwc3_ep0_start_control_status(struct dwc3_ep *dep)
 {
 	struct dwc3		*dwc = dep->dwc;
