@@ -555,8 +555,33 @@ static void dwc3_remove_requests(struct dwc3 *dwc, struct dwc3_ep *dep)
 {
 	struct dwc3_request		*req;
 
-	if (!list_empty(&dep->req_queued))
+	if (!list_empty(&dep->req_queued)) {
 		dwc3_stop_active_transfer(dwc, dep->number);
+
+		/*
+		 * NOTICE: We are violating what the Databook says about the
+		 * EndTransfer command. Ideally we would _always_ wait for the
+		 * EndTransfer Command Completion IRQ, but that's causing too
+		 * much trouble synchronizing between us and gadget driver.
+		 *
+		 * We have discussed this with the IP Provider and it was
+		 * suggested to giveback all requests here, but give HW some
+		 * extra time to synchronize with the interconnect. We're using
+		 * an arbitraty 100us delay for that.
+		 *
+		 * Note also that a similar handling was tested by Synopsys
+		 * (thanks a lot Paul) and nothing bad has come out of it.
+		 * In short, what we're doing is:
+		 *
+		 * - Issue EndTransfer WITH CMDIOC bit set
+		 * - Wait 100us
+		 * - giveback all requests to gadget driver
+		 */
+		udelay(100);
+
+		req = next_request(&dep->req_queued);
+		dwc3_gadget_giveback(dep, req, -ESHUTDOWN);
+	}
 
 	while (!list_empty(&dep->request_list)) {
 		req = next_request(&dep->request_list);
@@ -1735,46 +1760,6 @@ static void dwc3_endpoint_transfer_complete(struct dwc3 *dwc,
 	}
 }
 
-static void dwc3_process_ep_cmd_complete(struct dwc3_ep *dep,
-		const struct dwc3_event_depevt *event)
-{
-	struct dwc3 *dwc = dep->dwc;
-	struct dwc3_event_depevt mod_ev = *event;
-
-	/*
-	 * We were asked to remove one request. It is possible that this
-	 * request and a few others were started together and have the same
-	 * transfer index. Since we stopped the complete endpoint we don't
-	 * know how many requests were already completed (and not yet)
-	 * reported and how could be done (later). We purge them all until
-	 * the end of the list.
-	 */
-	mod_ev.status = DEPEVT_STATUS_LST;
-	dwc3_cleanup_done_reqs(dwc, dep, &mod_ev, -ESHUTDOWN);
-	dep->flags &= ~DWC3_EP_BUSY;
-	/* pending requests are ignored and are queued on XferNotReady */
-}
-
-static void dwc3_ep_cmd_compl(struct dwc3_ep *dep,
-		const struct dwc3_event_depevt *event)
-{
-	u32 param = event->parameters;
-	u32 cmd_type = (param >> 8) & ((1 << 5) - 1);
-
-	switch (cmd_type) {
-	case DWC3_DEPCMD_ENDTRANSFER:
-		dwc3_process_ep_cmd_complete(dep, event);
-		break;
-	case DWC3_DEPCMD_STARTTRANSFER:
-		dep->res_trans_idx = param & 0x7f;
-		break;
-	default:
-		printk(KERN_ERR "%s() unknown /unexpected type: %d\n",
-				__func__, cmd_type);
-		break;
-	};
-}
-
 static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		const struct dwc3_event_depevt *event)
 {
@@ -1782,6 +1767,9 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 	u8			epnum = event->endpoint_number;
 
 	dep = dwc->eps[epnum];
+
+	if (!(dep->flags & DWC3_EP_ENABLED))
+		return;
 
 	dev_vdbg(dwc->dev, "%s: %s\n", dep->name,
 			dwc3_ep_event_string(event->endpoint_event));
@@ -1856,7 +1844,7 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 		dev_dbg(dwc->dev, "%s FIFO Overrun\n", dep->name);
 		break;
 	case DWC3_DEPEVT_EPCMDCMPLT:
-		dwc3_ep_cmd_compl(dep, event);
+		dev_vdbg(dwc->dev, "Endpoint Command Complete\n");
 		break;
 	}
 }
@@ -1942,7 +1930,6 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	reg &= ~DWC3_DCTL_INITU2ENA;
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
 
-	dwc3_stop_active_transfers(dwc);
 	dwc3_disconnect_gadget(dwc);
 	dwc->start_config_issued = false;
 
