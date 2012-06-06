@@ -27,7 +27,7 @@
 #include <linux/hrtimer.h>
 #include "governor.h"
 
-struct class *devfreq_class;
+static struct class *devfreq_class;
 
 /*
  * devfreq_work periodically monitors every registered device.
