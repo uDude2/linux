@@ -4002,8 +4002,8 @@ F:	arch/ia64/include/asm/kvm*
 F:	arch/ia64/kvm/
 
 KERNEL VIRTUAL MACHINE for s390 (KVM/s390)
-M:	Carsten Otte <cotte@de.ibm.com>
 M:	Christian Borntraeger <borntraeger@de.ibm.com>
+M:	Cornelia Huck <cornelia.huck@de.ibm.com>
 M:	linux390@de.ibm.com
 L:	linux-s390@vger.kernel.org
 W:	http://www.ibm.com/developerworks/linux/linux390/
@@ -5210,7 +5210,7 @@ PCI SUBSYSTEM
 M:	Bjorn Helgaas <bhelgaas@google.com>
 L:	linux-pci@vger.kernel.org
 Q:	http://patchwork.ozlabs.org/project/linux-pci/list/
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/helgaas/linux.git
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/helgaas/pci.git
 S:	Supported
 F:	Documentation/PCI/
 F:	drivers/pci/
@@ -6242,9 +6242,9 @@ F:	Documentation/hwmon/smm665
 F:	drivers/hwmon/smm665.c
 
 SMSC EMC2103 HARDWARE MONITOR DRIVER
-M:	Steve Glendinning <steve.glendinning@smsc.com>
+M:	Steve Glendinning <steve.glendinning@shawell.net>
 L:	lm-sensors@lm-sensors.org
-S:	Supported
+S:	Maintained
 F:	Documentation/hwmon/emc2103
 F:	drivers/hwmon/emc2103.c
 
@@ -6263,22 +6263,22 @@ F:	Documentation/hwmon/smsc47b397
 F:	drivers/hwmon/smsc47b397.c
 
 SMSC911x ETHERNET DRIVER
-M:	Steve Glendinning <steve.glendinning@smsc.com>
+M:	Steve Glendinning <steve.glendinning@shawell.net>
 L:	netdev@vger.kernel.org
-S:	Supported
+S:	Maintained
 F:	include/linux/smsc911x.h
 F:	drivers/net/ethernet/smsc/smsc911x.*
 
 SMSC9420 PCI ETHERNET DRIVER
-M:	Steve Glendinning <steve.glendinning@smsc.com>
+M:	Steve Glendinning <steve.glendinning@shawell.net>
 L:	netdev@vger.kernel.org
-S:	Supported
+S:	Maintained
 F:	drivers/net/ethernet/smsc/smsc9420.*
 
 SMSC UFX6000 and UFX7000 USB to VGA DRIVER
-M:	Steve Glendinning <steve.glendinning@smsc.com>
+M:	Steve Glendinning <steve.glendinning@shawell.net>
 L:	linux-fbdev@vger.kernel.org
-S:	Supported
+S:	Maintained
 F:	drivers/video/smscufx.c
 
 SN-IA64 (Itanium) SUB-PLATFORM
@@ -6765,9 +6765,11 @@ F:	include/linux/tifm.h
 
 TI LM49xxx FAMILY ASoC CODEC DRIVERS
 M:	M R Swami Reddy <mr.swami.reddy@ti.com>
+M:	Vishwas A Deshpande <vishwas.a.deshpande@ti.com>
 L:	alsa-devel@alsa-project.org (moderated for non-subscribers)
 S:	Maintained
 F:	sound/soc/codecs/lm49453*
+F:	sound/soc/codecs/isabelle*
 
 TI TWL4030 SERIES SOC CODEC DRIVER
 M:	Peter Ujfalusi <peter.ujfalusi@ti.com>
@@ -6964,6 +6966,13 @@ M:	Evgeniy Dushistov <dushistov@mail.ru>
 S:	Maintained
 F:	Documentation/filesystems/ufs.txt
 F:	fs/ufs/
+
+UHID USERSPACE HID IO DRIVER:
+M:	David Herrmann <dh.herrmann@googlemail.com>
+L:	linux-input@vger.kernel.org
+S:	Maintained
+F:	drivers/hid/uhid.c
+F:	include/linux/uhid.h
 
 ULTRA-WIDEBAND (UWB) SUBSYSTEM:
 L:	linux-usb@vger.kernel.org
@@ -7225,9 +7234,9 @@ S:	Supported
 F:	drivers/usb/serial/whiteheat*
 
 USB SMSC95XX ETHERNET DRIVER
-M:	Steve Glendinning <steve.glendinning@smsc.com>
+M:	Steve Glendinning <steve.glendinning@shawell.net>
 L:	netdev@vger.kernel.org
-S:	Supported
+S:	Maintained
 F:	drivers/net/usb/smsc95xx.*
 
 USB SN9C1xx DRIVER
@@ -7596,6 +7605,7 @@ W:	http://opensource.wolfsonmicro.com/content/linux-drivers-wolfson-devices
 S:	Supported
 F:	Documentation/hwmon/wm83??
 F:	arch/arm/mach-s3c64xx/mach-crag6410*
+F:	drivers/clk/clk-wm83*.c
 F:	drivers/leds/leds-wm83*.c
 F:	drivers/hwmon/wm83??-hwmon.c
 F:	drivers/input/misc/wm831x-on.c
