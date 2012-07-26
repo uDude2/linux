@@ -45,6 +45,8 @@ config ARM
 	select GENERIC_SMP_IDLE_THREAD
 	select KTIME_SCALAR
 	select GENERIC_CLOCKEVENTS_BROADCAST if SMP
+	select HAVE_MOD_ARCH_SPECIFIC if ARM_UNWIND
+	select MODULES_USE_ELF_REL
 	help
 	  The ARM series is a line of low-power-consumption RISC chip designs
 	  licensed by ARM Ltd and targeted at embedded applications and
