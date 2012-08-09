@@ -71,10 +71,6 @@ struct musb_ep;
 #include <linux/usb/hcd.h>
 #include "musb_host.h"
 
-#define	is_peripheral_enabled(musb)	((musb)->board_mode != MUSB_HOST)
-#define	is_host_enabled(musb)		((musb)->board_mode != MUSB_PERIPHERAL)
-#define	is_otg_enabled(musb)		((musb)->board_mode == MUSB_OTG)
-
 /* NOTE:  otg and peripheral-only state machines start at B_IDLE.
  * OTG or host-only go to A_IDLE when ID is sensed.
  */
@@ -88,8 +84,6 @@ struct musb_ep;
 
 /****************************** PERIPHERAL ROLE *****************************/
 
-#define	is_peripheral_capable()	(1)
-
 extern irqreturn_t musb_g_ep0_irq(struct musb *);
 extern void musb_g_tx(struct musb *, u8);
 extern void musb_g_rx(struct musb *, u8);
@@ -100,8 +94,6 @@ extern void musb_g_wakeup(struct musb *);
 extern void musb_g_disconnect(struct musb *);
 
 /****************************** HOST ROLE ***********************************/
-
-#define	is_host_capable()	(1)
 
 extern irqreturn_t musb_h_ep0_irq(struct musb *);
 extern void musb_host_tx(struct musb *, u8);
@@ -376,7 +368,6 @@ struct musb {
 	u16 epmask;
 	u8 nr_endpoints;
 
-	u8 board_mode;		/* enum musb_mode */
 	int			(*board_set_power)(int state);
 
 	u8			min_power;	/* vbus for periph, in mA/2 */
