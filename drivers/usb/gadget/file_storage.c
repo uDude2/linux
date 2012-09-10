@@ -256,21 +256,6 @@
 
 #include "gadget_chips.h"
 
-
-
-/*
- * Kbuild is not very cooperative with respect to linking separately
- * compiled library objects into one module.  So for now we won't use
- * separate compilation ... ensuring init/exit sections work to shrink
- * the runtime footprint, and giving us at least some parts of what
- * a "gcc --combine ... part1.c part2.c part3.c ... " build would.
- */
-#include "usbstring.c"
-#include "config.c"
-#include "epautoconf.c"
-
-/*-------------------------------------------------------------------------*/
-
 #define DRIVER_DESC		"File-backed Storage Gadget"
 #define DRIVER_NAME		"g_file_storage"
 #define DRIVER_VERSION		"1 September 2010"
@@ -3331,7 +3316,8 @@ static int __init check_parameters(struct fsg_dev *fsg)
 }
 
 
-static int __init fsg_bind(struct usb_gadget *gadget)
+static int __init fsg_bind(struct usb_gadget *gadget,
+		struct usb_gadget_driver *driver)
 {
 	struct fsg_dev		*fsg = the_fsg;
 	int			rc;
@@ -3603,9 +3589,10 @@ static void fsg_resume(struct usb_gadget *gadget)
 
 /*-------------------------------------------------------------------------*/
 
-static struct usb_gadget_driver		fsg_driver = {
+static __refdata struct usb_gadget_driver		fsg_driver = {
 	.max_speed	= USB_SPEED_SUPER,
 	.function	= (char *) fsg_string_product,
+	.bind		= fsg_bind,
 	.unbind		= fsg_unbind,
 	.disconnect	= fsg_disconnect,
 	.setup		= fsg_setup,
@@ -3653,7 +3640,8 @@ static int __init fsg_init(void)
 	if ((rc = fsg_alloc()) != 0)
 		return rc;
 	fsg = the_fsg;
-	if ((rc = usb_gadget_probe_driver(&fsg_driver, fsg_bind)) != 0)
+	rc = usb_gadget_probe_driver(&fsg_driver);
+	if (rc != 0)
 		kref_put(&fsg->ref, fsg_release);
 	return rc;
 }

@@ -12,7 +12,6 @@
 #include <linux/errno.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/list.h>
 #include <linux/string.h>
 #include <linux/device.h>
@@ -54,7 +53,7 @@ usb_descriptor_fillbuf(void *buf, unsigned buflen,
 	}
 	return dest - (u8 *)buf;
 }
-EXPORT_SYMBOL_GPL(usb_descriptor_fillbuf);
+
 
 /**
  * usb_gadget_config_buf - builts a complete configuration descriptor
@@ -107,7 +106,6 @@ int usb_gadget_config_buf(
 	cp->bmAttributes |= USB_CONFIG_ATT_ONE;
 	return len;
 }
-EXPORT_SYMBOL_GPL(usb_gadget_config_buf);
 
 /**
  * usb_copy_descriptors - copy a vector of USB descriptors
@@ -157,4 +155,4 @@ usb_copy_descriptors(struct usb_descriptor_header **src)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(usb_copy_descriptors);
+

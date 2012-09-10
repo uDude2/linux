@@ -213,6 +213,7 @@
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/freezer.h>
+#include <linux/utsname.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
