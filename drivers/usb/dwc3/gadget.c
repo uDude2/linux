@@ -1082,6 +1082,8 @@ static int __dwc3_gadget_ep_queue(struct dwc3_ep *dep, struct dwc3_request *req)
 	 *
 	 */
 	if (dep->flags & DWC3_EP_PENDING_REQUEST) {
+		int	ret;
+
 		/*
 		 * If xfernotready is already elapsed and it is a case
 		 * of isoc transfer, then issue END TRANSFER, so that
@@ -1902,7 +1904,7 @@ static void dwc3_stop_active_transfer(struct dwc3 *dwc, u32 epnum)
 	ret = dwc3_send_gadget_ep_cmd(dwc, dep->number, cmd, &params);
 	WARN_ON_ONCE(ret);
 	dep->resource_index = 0;
-
+	dep->flags &= ~DWC3_EP_BUSY;
 	udelay(100);
 }
 
