@@ -467,12 +467,12 @@ void musb_hnp_stop(struct musb *musb)
  */
 
 static irqreturn_t musb_stage0_irq(struct musb *musb, u8 int_usb,
-				u8 devctl, u8 power)
+				u8 devctl)
 {
 	struct usb_otg *otg = musb->xceiv->otg;
 	irqreturn_t handled = IRQ_NONE;
 
-	dev_dbg(musb->controller, "<== Power=%02x, DevCtl=%02x, int_usb=0x%x\n", power, devctl,
+	dev_dbg(musb->controller, "<== DevCtl=%02x, int_usb=0x%x\n", devctl,
 		int_usb);
 
 	/* in host mode, the peripheral may issue remote wakeup.
@@ -485,6 +485,7 @@ static irqreturn_t musb_stage0_irq(struct musb *musb, u8 int_usb,
 
 		if (devctl & MUSB_DEVCTL_HM) {
 			void __iomem *mbase = musb->mregs;
+			u8 power;
 
 			switch (musb->xceiv->state) {
 			case OTG_STATE_A_SUSPEND:
@@ -492,6 +493,7 @@ static irqreturn_t musb_stage0_irq(struct musb *musb, u8 int_usb,
 				 * will stop RESUME signaling
 				 */
 
+				power = musb_readb(musb->mregs, MUSB_POWER);
 				if (power & MUSB_POWER_SUSPENDM) {
 					/* spurious */
 					musb->int_usb &= ~MUSB_INTR_SUSPEND;
@@ -655,8 +657,8 @@ static irqreturn_t musb_stage0_irq(struct musb *musb, u8 int_usb,
 	}
 
 	if (int_usb & MUSB_INTR_SUSPEND) {
-		dev_dbg(musb->controller, "SUSPEND (%s) devctl %02x power %02x\n",
-			otg_state_string(musb->xceiv->state), devctl, power);
+		dev_dbg(musb->controller, "SUSPEND (%s) devctl %02x\n",
+			otg_state_string(musb->xceiv->state), devctl);
 		handled = IRQ_HANDLED;
 
 		switch (musb->xceiv->state) {
@@ -722,8 +724,10 @@ static irqreturn_t musb_stage0_irq(struct musb *musb, u8 int_usb,
 		if (is_peripheral_active(musb)) {
 			/* REVISIT HNP; just force disconnect */
 		}
-		musb_writew(musb->mregs, MUSB_INTRTXE, musb->epmask);
-		musb_writew(musb->mregs, MUSB_INTRRXE, musb->epmask & 0xfffe);
+		musb->intrtxe = musb->epmask;
+		musb_writew(musb->mregs, MUSB_INTRTXE, musb->intrtxe);
+		musb->intrrxe = musb->epmask & 0xfffe;
+		musb_writew(musb->mregs, MUSB_INTRRXE, musb->intrrxe);
 		musb_writeb(musb->mregs, MUSB_INTRUSBE, 0xf7);
 		musb->port1_status &= ~(USB_PORT_STAT_LOW_SPEED
 					|USB_PORT_STAT_HIGH_SPEED
@@ -944,8 +948,10 @@ void musb_start(struct musb *musb)
 	dev_dbg(musb->controller, "<== devctl %02x\n", devctl);
 
 	/*  Set INT enable registers, enable interrupts */
-	musb_writew(regs, MUSB_INTRTXE, musb->epmask);
-	musb_writew(regs, MUSB_INTRRXE, musb->epmask & 0xfffe);
+	musb->intrtxe = musb->epmask;
+	musb_writew(regs, MUSB_INTRTXE, musb->intrtxe);
+	musb->intrrxe = musb->epmask & 0xfffe;
+	musb_writew(regs, MUSB_INTRRXE, musb->intrrxe);
 	musb_writeb(regs, MUSB_INTRUSBE, 0xf7);
 
 	musb_writeb(regs, MUSB_TESTMODE, 0);
@@ -983,7 +989,9 @@ static void musb_generic_disable(struct musb *musb)
 
 	/* disable interrupts */
 	musb_writeb(mbase, MUSB_INTRUSBE, 0);
+	musb->intrtxe = 0;
 	musb_writew(mbase, MUSB_INTRTXE, 0);
+	musb->intrrxe = 0;
 	musb_writew(mbase, MUSB_INTRRXE, 0);
 
 	/* off */
@@ -1560,12 +1568,11 @@ static irqreturn_t generic_interrupt(int irq, void *__hci)
 irqreturn_t musb_interrupt(struct musb *musb)
 {
 	irqreturn_t	retval = IRQ_NONE;
-	u8		devctl, power;
+	u8		devctl;
 	int		ep_num;
 	u32		reg;
 
 	devctl = musb_readb(musb->mregs, MUSB_DEVCTL);
-	power = musb_readb(musb->mregs, MUSB_POWER);
 
 	dev_dbg(musb->controller, "** IRQ %s usb%04x tx%04x rx%04x\n",
 		(devctl & MUSB_DEVCTL_HM) ? "host" : "peripheral",
@@ -1576,7 +1583,7 @@ irqreturn_t musb_interrupt(struct musb *musb)
 	 */
 	if (musb->int_usb)
 		retval |= musb_stage0_irq(musb, musb->int_usb,
-				devctl, power);
+				devctl);
 
 	/* "stage 1" is handling endpoint irqs */
 
@@ -2120,8 +2127,6 @@ static void musb_save_context(struct musb *musb)
 	musb->context.testmode = musb_readb(musb_base, MUSB_TESTMODE);
 	musb->context.busctl = musb_read_ulpi_buscontrol(musb->mregs);
 	musb->context.power = musb_readb(musb_base, MUSB_POWER);
-	musb->context.intrtxe = musb_readw(musb_base, MUSB_INTRTXE);
-	musb->context.intrrxe = musb_readw(musb_base, MUSB_INTRRXE);
 	musb->context.intrusbe = musb_readb(musb_base, MUSB_INTRUSBE);
 	musb->context.index = musb_readb(musb_base, MUSB_INDEX);
 	musb->context.devctl = musb_readb(musb_base, MUSB_DEVCTL);
@@ -2194,8 +2199,8 @@ static void musb_restore_context(struct musb *musb)
 	musb_writeb(musb_base, MUSB_TESTMODE, musb->context.testmode);
 	musb_write_ulpi_buscontrol(musb->mregs, musb->context.busctl);
 	musb_writeb(musb_base, MUSB_POWER, musb->context.power);
-	musb_writew(musb_base, MUSB_INTRTXE, musb->context.intrtxe);
-	musb_writew(musb_base, MUSB_INTRRXE, musb->context.intrrxe);
+	musb_writew(musb_base, MUSB_INTRTXE, musb->intrtxe);
+	musb_writew(musb_base, MUSB_INTRRXE, musb->intrrxe);
 	musb_writeb(musb_base, MUSB_INTRUSBE, musb->context.intrusbe);
 	musb_writeb(musb_base, MUSB_DEVCTL, musb->context.devctl);
 
