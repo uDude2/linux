@@ -124,8 +124,44 @@ struct dsps_glue {
 	const struct dsps_musb_wrapper *wrp; /* wrapper register offsets */
 	struct timer_list timer[2];	/* otg_workaround timer */
 	unsigned long last_timer[2];    /* last timer data for each instance */
+	u32 __iomem *usb_ctrl[2];
 };
 
+#define	DSPS_AM33XX_CONTROL_MODULE_PHYS_0	0x44e10620
+#define	DSPS_AM33XX_CONTROL_MODULE_PHYS_1	0x44e10628
+
+static const resource_size_t dsps_control_module_phys[] = {
+	DSPS_AM33XX_CONTROL_MODULE_PHYS_0,
+	DSPS_AM33XX_CONTROL_MODULE_PHYS_1,
+};
+
+/**
+ * musb_dsps_phy_control - phy on/off
+ * @glue: struct dsps_glue *
+ * @id: musb instance
+ * @on: flag for phy to be switched on or off
+ *
+ * This is to enable the PHY using usb_ctrl register in system control
+ * module space.
+ *
+ * XXX: This function will be removed once we have a seperate driver for
+ * control module
+ */
+static void musb_dsps_phy_control(struct dsps_glue *glue, u8 id, u8 on)
+{
+	u32 usbphycfg;
+
+	usbphycfg = readl(glue->usb_ctrl[id]);
+
+	if (on) {
+		usbphycfg &= ~(USBPHY_CM_PWRDN | USBPHY_OTG_PWRDN);
+		usbphycfg |= USBPHY_OTGVDET_EN | USBPHY_OTGSESSEND_EN;
+	} else {
+		usbphycfg |= USBPHY_CM_PWRDN | USBPHY_OTG_PWRDN;
+	}
+
+	writel(usbphycfg, glue->usb_ctrl[id]);
+}
 /**
  * dsps_musb_enable - enable interrupts
  */
@@ -365,11 +401,9 @@ static irqreturn_t dsps_interrupt(int irq, void *hci)
 static int dsps_musb_init(struct musb *musb)
 {
 	struct device *dev = musb->controller;
-	struct musb_hdrc_platform_data *plat = dev->platform_data;
 	struct platform_device *pdev = to_platform_device(dev);
 	struct dsps_glue *glue = dev_get_drvdata(dev->parent);
 	const struct dsps_musb_wrapper *wrp = glue->wrp;
-	struct omap_musb_board_data *data = plat->board_data;
 	void __iomem *reg_base = musb->ctrl_base;
 	u32 rev, val;
 	int status;
@@ -395,8 +429,7 @@ static int dsps_musb_init(struct musb *musb)
 	dsps_writel(reg_base, wrp->control, (1 << wrp->reset));
 
 	/* Start the on-chip PHY and its PLL. */
-	if (data->set_phy_power)
-		data->set_phy_power(1);
+	musb_dsps_phy_control(glue, pdev->id, 1);
 
 	musb->isr = dsps_interrupt;
 
@@ -418,16 +451,13 @@ err0:
 static int dsps_musb_exit(struct musb *musb)
 {
 	struct device *dev = musb->controller;
-	struct musb_hdrc_platform_data *plat = dev->platform_data;
-	struct omap_musb_board_data *data = plat->board_data;
 	struct platform_device *pdev = to_platform_device(dev);
 	struct dsps_glue *glue = dev_get_drvdata(dev->parent);
 
 	del_timer_sync(&glue->timer[pdev->id]);
 
 	/* Shutdown the on-chip PHY and its PLL. */
-	if (data->set_phy_power)
-		data->set_phy_power(0);
+	musb_dsps_phy_control(glue, pdev->id, 0);
 
 	/* NOP driver needs change if supporting dual instance */
 	usb_put_phy(musb->xceiv);
@@ -461,22 +491,31 @@ static int __devinit dsps_create_musb_pdev(struct dsps_glue *glue, u8 id)
 	char res_name[11];
 	int ret;
 
-	/* get memory resource */
-	snprintf(res_name, sizeof(res_name), "musb%d", id);
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, res_name);
+	resources[0].start = dsps_control_module_phys[id];
+	resources[0].end = resources[0].start + SZ_4 - 1;
+	resources[0].flags = IORESOURCE_MEM;
+
+	glue->usb_ctrl[id] = devm_request_and_ioremap(&pdev->dev, resources);
+	if (glue->usb_ctrl[id] == NULL) {
+		dev_err(dev, "Failed to obtain usb_ctrl%d memory\n", id);
+		ret = -ENODEV;
+		goto err0;
+	}
+
+	/* first resource is for usbss, so start index from 1 */
+	res = platform_get_resource(pdev, IORESOURCE_MEM, id + 1);
 	if (!res) {
-		dev_err(dev, "%s get mem resource failed\n", res_name);
+		dev_err(dev, "failed to get memory for instance %d\n", id);
 		ret = -ENODEV;
 		goto err0;
 	}
 	res->parent = NULL;
 	resources[0] = *res;
 
-	/* get irq resource */
-	snprintf(res_name, sizeof(res_name), "musb%d-irq", id);
-	res = platform_get_resource_byname(pdev, IORESOURCE_IRQ, res_name);
+	/* first resource is for usbss, so start index from 1 */
+	res = platform_get_resource(pdev, IORESOURCE_IRQ, id + 1);
 	if (!res) {
-		dev_err(dev, "%s get irq resource failed\n", res_name);
+		dev_err(dev, "failed to get irq for instance %d\n", id);
 		ret = -ENODEV;
 		goto err0;
 	}
@@ -649,24 +688,26 @@ static int __devexit dsps_remove(struct platform_device *pdev)
 #ifdef CONFIG_PM_SLEEP
 static int dsps_suspend(struct device *dev)
 {
-	struct musb_hdrc_platform_data *plat = dev->platform_data;
-	struct omap_musb_board_data *data = plat->board_data;
+	struct platform_device *pdev = to_platform_device(dev->parent);
+	struct dsps_glue *glue = platform_get_drvdata(pdev);
+	const struct dsps_musb_wrapper *wrp = glue->wrp;
+	int i;
 
-	/* Shutdown the on-chip PHY and its PLL. */
-	if (data->set_phy_power)
-		data->set_phy_power(0);
+	for (i = 0; i < wrp->instances; i++)
+		musb_dsps_phy_control(glue, i, 0);
 
 	return 0;
 }
 
 static int dsps_resume(struct device *dev)
 {
-	struct musb_hdrc_platform_data *plat = dev->platform_data;
-	struct omap_musb_board_data *data = plat->board_data;
+	struct platform_device *pdev = to_platform_device(dev->parent);
+	struct dsps_glue *glue = platform_get_drvdata(pdev);
+	const struct dsps_musb_wrapper *wrp = glue->wrp;
+	int i;
 
-	/* Start the on-chip PHY and its PLL. */
-	if (data->set_phy_power)
-		data->set_phy_power(1);
+	for (i = 0; i < wrp->instances; i++)
+		musb_dsps_phy_control(glue, i, 1);
 
 	return 0;
 }
@@ -702,7 +743,7 @@ static const struct dsps_musb_wrapper ti81xx_driver_data __devinitconst = {
 	.rxep_bitmap		= (0xfffe << 16),
 	.musb_core_offset	= 0x400,
 	.poll_seconds		= 2,
-	.instances		= 2,
+	.instances		= 1,
 };
 
 static const struct platform_device_id musb_dsps_id_table[] __devinitconst = {
