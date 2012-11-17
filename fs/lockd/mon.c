@@ -608,6 +608,7 @@ static struct rpc_stat		nsm_stats;
 
 static const struct rpc_program nsm_program = {
 		.name		= "statd",
+		.service_name	= "status",
 		.number		= NSM_PROGRAM,
 		.nrvers		= ARRAY_SIZE(nsm_version),
 		.version	= nsm_version,
