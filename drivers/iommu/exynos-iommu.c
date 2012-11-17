@@ -26,6 +26,7 @@
 #include <linux/memblock.h>
 #include <linux/export.h>
 #include <linux/of_platform.h>
+#include <linux/of.h>
 
 #include <asm/cacheflush.h>
 #include <asm/pgtable.h>
