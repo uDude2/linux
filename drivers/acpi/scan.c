@@ -35,6 +35,8 @@ static const char *dummy_hid = "device";
  */
 static const struct acpi_device_id acpi_platform_device_ids[] = {
 
+	{ "PNP0D40" },
+
 	{ }
 };
 
@@ -443,8 +445,8 @@ const struct acpi_device_id *acpi_match_device(const struct acpi_device_id *ids,
 {
 	struct acpi_device *adev;
 
-	if (!ids || !dev->acpi_handle
-	    || ACPI_FAILURE(acpi_bus_get_device(dev->acpi_handle, &adev)))
+	if (!ids || !ACPI_HANDLE(dev)
+	    || ACPI_FAILURE(acpi_bus_get_device(ACPI_HANDLE(dev), &adev)))
 		return NULL;
 
 	return __acpi_match_device(adev, ids);
