@@ -1054,6 +1054,7 @@ static bool wm5102_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_FLL1_CONTROL_5:
 	case ARIZONA_FLL1_CONTROL_6:
 	case ARIZONA_FLL1_LOOP_FILTER_TEST_1:
+	case ARIZONA_FLL1_NCO_TEST_0:
 	case ARIZONA_FLL1_SYNCHRONISER_1:
 	case ARIZONA_FLL1_SYNCHRONISER_2:
 	case ARIZONA_FLL1_SYNCHRONISER_3:
@@ -1069,6 +1070,7 @@ static bool wm5102_readable_register(struct device *dev, unsigned int reg)
 	case ARIZONA_FLL2_CONTROL_5:
 	case ARIZONA_FLL2_CONTROL_6:
 	case ARIZONA_FLL2_LOOP_FILTER_TEST_1:
+	case ARIZONA_FLL2_NCO_TEST_0:
 	case ARIZONA_FLL2_SYNCHRONISER_1:
 	case ARIZONA_FLL2_SYNCHRONISER_2:
 	case ARIZONA_FLL2_SYNCHRONISER_3:
@@ -1814,11 +1816,16 @@ static bool wm5102_volatile_register(struct device *dev, unsigned int reg)
 	case ARIZONA_SOFTWARE_RESET:
 	case ARIZONA_DEVICE_REVISION:
 	case ARIZONA_OUTPUT_STATUS_1:
+	case ARIZONA_RAW_OUTPUT_STATUS_1:
+	case ARIZONA_SLIMBUS_RX_PORT_STATUS:
+	case ARIZONA_SLIMBUS_TX_PORT_STATUS:
 	case ARIZONA_SAMPLE_RATE_1_STATUS:
 	case ARIZONA_SAMPLE_RATE_2_STATUS:
 	case ARIZONA_SAMPLE_RATE_3_STATUS:
 	case ARIZONA_HAPTICS_STATUS:
 	case ARIZONA_ASYNC_SAMPLE_RATE_1_STATUS:
+	case ARIZONA_FLL1_NCO_TEST_0:
+	case ARIZONA_FLL2_NCO_TEST_0:
 	case ARIZONA_FX_CTRL2:
 	case ARIZONA_INTERRUPT_STATUS_1:
 	case ARIZONA_INTERRUPT_STATUS_2:
@@ -1852,12 +1859,14 @@ static bool wm5102_volatile_register(struct device *dev, unsigned int reg)
 	}
 }
 
+#define WM5102_MAX_REGISTER 0x1a8fff
+
 const struct regmap_config wm5102_spi_regmap = {
 	.reg_bits = 32,
 	.pad_bits = 16,
 	.val_bits = 16,
 
-	.max_register = ARIZONA_DSP1_STATUS_2,
+	.max_register = WM5102_MAX_REGISTER,
 	.readable_reg = wm5102_readable_register,
 	.volatile_reg = wm5102_volatile_register,
 
@@ -1871,7 +1880,7 @@ const struct regmap_config wm5102_i2c_regmap = {
 	.reg_bits = 32,
 	.val_bits = 16,
 
-	.max_register = ARIZONA_DSP1_STATUS_2,
+	.max_register = WM5102_MAX_REGISTER,
 	.readable_reg = wm5102_readable_register,
 	.volatile_reg = wm5102_volatile_register,
 
