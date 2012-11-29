@@ -108,7 +108,7 @@ void coprocessor_flush_all(struct thread_info *ti)
 
 void cpu_idle(void)
 {
-  	local_irq_enable();
+	local_irq_enable();
 
 	/* endless idle loop with no priority at all */
 	while (1) {
@@ -367,9 +367,9 @@ int dump_fpu(void)
 
 asmlinkage
 long xtensa_clone(unsigned long clone_flags, unsigned long newsp,
-                  void __user *parent_tid, void *child_tls,
-                  void __user *child_tid, long a5,
-                  struct pt_regs *regs)
+		  void __user *parent_tid, void *child_tls,
+		  void __user *child_tid, long a5,
+		  struct pt_regs *regs)
 {
-        return do_fork(clone_flags, newsp, regs, 0, parent_tid, child_tid);
+	return do_fork(clone_flags, newsp, regs, 0, parent_tid, child_tid);
 }
