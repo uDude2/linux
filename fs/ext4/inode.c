@@ -770,7 +770,7 @@ struct buffer_head *ext4_bread(handle_t *handle, struct inode *inode,
 	return NULL;
 }
 
-int walk_page_buffers(handle_t *handle,
+int ext4_walk_page_buffers(handle_t *handle,
 			     struct buffer_head *head,
 			     unsigned from,
 			     unsigned to,
@@ -911,7 +911,7 @@ retry:
 		ret = __block_write_begin(page, pos, len, ext4_get_block);
 
 	if (!ret && ext4_should_journal_data(inode)) {
-		ret = walk_page_buffers(handle, page_buffers(page),
+		ret = ext4_walk_page_buffers(handle, page_buffers(page),
 				from, to, NULL, do_journal_get_write_access);
 	}
 
@@ -1133,7 +1133,7 @@ static int ext4_journalled_write_end(struct file *file,
 			page_zero_new_buffers(page, from+copied, to);
 		}
 
-		ret = walk_page_buffers(handle, page_buffers(page), from,
+		ret = ext4_walk_page_buffers(handle, page_buffers(page), from,
 					to, &partial, write_end_fn);
 		if (!partial)
 			SetPageUptodate(page);
@@ -1942,7 +1942,7 @@ static int __ext4_journalled_writepage(struct page *page,
 	} else {
 		page_bufs = page_buffers(page);
 		BUG_ON(!page_bufs);
-		walk_page_buffers(handle, page_bufs, 0, len, NULL, bget_one);
+		ext4_walk_page_buffers(handle, page_bufs, 0, len, NULL, bget_one);
 	}
 	/* As soon as we unlock the page, it can go away, but we have
 	 * references to buffers so we are safe */
@@ -1962,10 +1962,10 @@ static int __ext4_journalled_writepage(struct page *page,
 		err = ext4_handle_dirty_metadata(handle, inode, inode_bh);
 
 	} else {
-		ret = walk_page_buffers(handle, page_bufs, 0, len, NULL,
+		ret = ext4_walk_page_buffers(handle, page_bufs, 0, len, NULL,
 					do_journal_get_write_access);
 
-		err = walk_page_buffers(handle, page_bufs, 0, len, NULL,
+		err = ext4_walk_page_buffers(handle, page_bufs, 0, len, NULL,
 					write_end_fn);
 	}
 
@@ -1977,7 +1977,7 @@ static int __ext4_journalled_writepage(struct page *page,
 		ret = err;
 
 	if (!ext4_has_inline_data(inode))
-		walk_page_buffers(handle, page_bufs, 0, len, NULL, bput_one);
+		ext4_walk_page_buffers(handle, page_bufs, 0, len, NULL, bput_one);
 	ext4_set_inode_state(inode, EXT4_STATE_JDATA);
 out:
 	brelse(inode_bh);
@@ -2057,7 +2057,7 @@ static int ext4_writepage(struct page *page,
 		commit_write = 1;
 	}
 	page_bufs = page_buffers(page);
-	if (walk_page_buffers(NULL, page_bufs, 0, len, NULL,
+	if (ext4_walk_page_buffers(NULL, page_bufs, 0, len, NULL,
 			      ext4_bh_delay_or_unwritten)) {
 		/*
 		 * We don't want to do block allocation, so redirty
@@ -4888,7 +4888,7 @@ int ext4_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf)
 	 * journal_start/journal_stop which can block and take a long time
 	 */
 	if (page_has_buffers(page)) {
-		if (!walk_page_buffers(NULL, page_buffers(page), 0, len, NULL,
+		if (!ext4_walk_page_buffers(NULL, page_buffers(page), 0, len, NULL,
 					ext4_bh_unmapped)) {
 			/* Wait so that we don't change page under IO */
 			wait_on_page_writeback(page);
@@ -4910,7 +4910,7 @@ retry_alloc:
 	}
 	ret = __block_page_mkwrite(vma, vmf, get_block);
 	if (!ret && ext4_should_journal_data(inode)) {
-		if (walk_page_buffers(handle, page_buffers(page), 0,
+		if (ext4_walk_page_buffers(handle, page_buffers(page), 0,
 			  PAGE_CACHE_SIZE, NULL, do_journal_get_write_access)) {
 			unlock_page(page);
 			ret = VM_FAULT_SIGBUS;
