@@ -3352,7 +3352,7 @@ phy_fail:
 	return retval;
 }
 
-static int __devexit lpc32xx_udc_remove(struct platform_device *pdev)
+static int lpc32xx_udc_remove(struct platform_device *pdev)
 {
 	struct lpc32xx_udc *udc = platform_get_drvdata(pdev);
 
@@ -3447,7 +3447,7 @@ MODULE_DEVICE_TABLE(of, lpc32xx_udc_of_match);
 #endif
 
 static struct platform_driver lpc32xx_udc_driver = {
-	.remove		= __devexit_p(lpc32xx_udc_remove),
+	.remove		= lpc32xx_udc_remove,
 	.shutdown	= lpc32xx_udc_shutdown,
 	.suspend	= lpc32xx_udc_suspend,
 	.resume		= lpc32xx_udc_resume,

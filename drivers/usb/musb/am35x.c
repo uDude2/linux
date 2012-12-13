@@ -34,8 +34,7 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/usb/nop-usb-xceiv.h>
-
-#include <plat/usb.h>
+#include <linux/platform_data/usb-omap.h>
 
 #include "musb_core.h"
 
@@ -455,7 +454,7 @@ static const struct musb_platform_ops am35x_ops = {
 
 static u64 am35x_dmamask = DMA_BIT_MASK(32);
 
-static int __devinit am35x_probe(struct platform_device *pdev)
+static int am35x_probe(struct platform_device *pdev)
 {
 	struct musb_hdrc_platform_data	*pdata = pdev->dev.platform_data;
 	struct platform_device		*musb;
@@ -560,7 +559,7 @@ err0:
 	return ret;
 }
 
-static int __devexit am35x_remove(struct platform_device *pdev)
+static int am35x_remove(struct platform_device *pdev)
 {
 	struct am35x_glue	*glue = platform_get_drvdata(pdev);
 
@@ -629,7 +628,7 @@ static struct dev_pm_ops am35x_pm_ops = {
 
 static struct platform_driver am35x_driver = {
 	.probe		= am35x_probe,
-	.remove		= __devexit_p(am35x_remove),
+	.remove		= am35x_remove,
 	.driver		= {
 		.name	= "musb-am35x",
 		.pm	= DEV_PM_OPS,

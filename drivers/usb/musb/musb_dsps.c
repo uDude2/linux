@@ -38,12 +38,11 @@
 #include <linux/pm_runtime.h>
 #include <linux/module.h>
 #include <linux/usb/nop-usb-xceiv.h>
+#include <linux/platform_data/usb-omap.h>
 
 #include <linux/of.h>
 #include <linux/of_device.h>
 #include <linux/of_address.h>
-
-#include <plat/usb.h>
 
 #include "musb_core.h"
 
@@ -479,7 +478,7 @@ static struct musb_platform_ops dsps_ops = {
 
 static u64 musb_dmamask = DMA_BIT_MASK(32);
 
-static int __devinit dsps_create_musb_pdev(struct dsps_glue *glue, u8 id)
+static int dsps_create_musb_pdev(struct dsps_glue *glue, u8 id)
 {
 	struct device *dev = glue->dev;
 	struct platform_device *pdev = to_platform_device(dev);
@@ -592,7 +591,7 @@ err0:
 	return ret;
 }
 
-static int __devinit dsps_probe(struct platform_device *pdev)
+static int dsps_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
 	const struct of_device_id *match;
@@ -668,7 +667,7 @@ err1:
 err0:
 	return ret;
 }
-static int __devexit dsps_remove(struct platform_device *pdev)
+static int dsps_remove(struct platform_device *pdev)
 {
 	struct dsps_glue *glue = platform_get_drvdata(pdev);
 	const struct dsps_musb_wrapper *wrp = glue->wrp;
@@ -716,7 +715,7 @@ static int dsps_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(dsps_pm_ops, dsps_suspend, dsps_resume);
 
-static const struct dsps_musb_wrapper ti81xx_driver_data __devinitconst = {
+static const struct dsps_musb_wrapper ti81xx_driver_data = {
 	.revision		= 0x00,
 	.control		= 0x14,
 	.status			= 0x18,
@@ -747,7 +746,7 @@ static const struct dsps_musb_wrapper ti81xx_driver_data __devinitconst = {
 	.instances		= 1,
 };
 
-static const struct platform_device_id musb_dsps_id_table[] __devinitconst = {
+static const struct platform_device_id musb_dsps_id_table[] = {
 	{
 		.name	= "musb-ti81xx",
 		.driver_data	= (kernel_ulong_t) &ti81xx_driver_data,
@@ -757,7 +756,7 @@ static const struct platform_device_id musb_dsps_id_table[] __devinitconst = {
 MODULE_DEVICE_TABLE(platform, musb_dsps_id_table);
 
 #ifdef CONFIG_OF
-static const struct of_device_id musb_dsps_of_match[] __devinitconst = {
+static const struct of_device_id musb_dsps_of_match[] = {
 	{ .compatible = "ti,musb-am33xx",
 		.data = (void *) &ti81xx_driver_data, },
 	{  },
@@ -767,7 +766,7 @@ MODULE_DEVICE_TABLE(of, musb_dsps_of_match);
 
 static struct platform_driver dsps_usbss_driver = {
 	.probe		= dsps_probe,
-	.remove         = __devexit_p(dsps_remove),
+	.remove         = dsps_remove,
 	.driver         = {
 		.name   = "musb-dsps",
 		.pm	= &dsps_pm_ops,
