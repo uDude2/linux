@@ -109,7 +109,7 @@ extern int radeon_lockup_timeout;
 #define RADEON_BIOS_NUM_SCRATCH			8
 
 /* max number of rings */
-#define RADEON_NUM_RINGS			3
+#define RADEON_NUM_RINGS			5
 
 /* fence seq are set to this number when signaled */
 #define RADEON_FENCE_SIGNALED_SEQ		0LL
@@ -121,6 +121,11 @@ extern int radeon_lockup_timeout;
 /* cayman has 2 compute CP rings */
 #define CAYMAN_RING_TYPE_CP1_INDEX		1
 #define CAYMAN_RING_TYPE_CP2_INDEX		2
+
+/* R600+ has an async dma ring */
+#define R600_RING_TYPE_DMA_INDEX		3
+/* cayman add a second async dma ring */
+#define CAYMAN_RING_TYPE_DMA1_INDEX		4
 
 /* hardcode those limit for now */
 #define RADEON_VA_IB_OFFSET			(1 << 20)
@@ -313,6 +318,7 @@ struct radeon_bo {
 	struct list_head		list;
 	/* Protected by tbo.reserved */
 	u32				placements[3];
+	u32				busy_placements[3];
 	struct ttm_placement		placement;
 	struct ttm_buffer_object	tbo;
 	struct ttm_bo_kmap_obj		kmap;
@@ -787,6 +793,15 @@ int radeon_ring_init(struct radeon_device *rdev, struct radeon_ring *cp, unsigne
 void radeon_ring_fini(struct radeon_device *rdev, struct radeon_ring *cp);
 
 
+/* r600 async dma */
+void r600_dma_stop(struct radeon_device *rdev);
+int r600_dma_resume(struct radeon_device *rdev);
+void r600_dma_fini(struct radeon_device *rdev);
+
+void cayman_dma_stop(struct radeon_device *rdev);
+int cayman_dma_resume(struct radeon_device *rdev);
+void cayman_dma_fini(struct radeon_device *rdev);
+
 /*
  * CS.
  */
@@ -883,7 +898,9 @@ struct radeon_wb {
 #define RADEON_WB_CP_RPTR_OFFSET 1024
 #define RADEON_WB_CP1_RPTR_OFFSET 1280
 #define RADEON_WB_CP2_RPTR_OFFSET 1536
+#define R600_WB_DMA_RPTR_OFFSET   1792
 #define R600_WB_IH_WPTR_OFFSET   2048
+#define CAYMAN_WB_DMA1_RPTR_OFFSET   2304
 #define R600_WB_EVENT_OFFSET     3072
 
 /**
