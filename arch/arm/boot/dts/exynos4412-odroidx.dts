@@ -73,4 +73,25 @@
 			linux,default-trigger = "mmc0";
 		};
 	};
+
+	mshc@12550000 {
+		num-slots = <1>;
+		supports-highspeed;
+		broken-cd;
+		fifo-depth = <0x80>;
+		card-detect-delay = <200>;
+		samsung,dw-mshc-ciu-div = <3>;
+		samsung,dw-mshc-sdr-timing = <2 3 3>;
+		samsung,dw-mshc-ddr-timing = <1 2 3>;
+
+		slot@0 {
+			reg = <0>;
+			bus-width = <8>;
+			gpios = <&gpk0 0 3>, <&gpk0 1 3>,
+				<&gpk0 3 3>, <&gpk0 4 3>,
+				<&gpk0 5 3>, <&gpk0 6 3>,
+				<&gpk1 3 4>, <&gpk1 4 4>,
+				<&gpk1 5 4>, <&gpk1 6 4>;
+		};
+	};
 };
