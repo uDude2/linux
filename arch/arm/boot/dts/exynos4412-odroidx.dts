@@ -88,4 +88,203 @@
 			reg = <0>;
 		};
 	};
+
+	i2c@13860000 {
+		pinctrl-0 = <&i2c0_bus>;
+		pinctrl-names = "default";
+		status = "okay";
+
+		max77686: pmic@09 {
+			reg = <0x09>;
+		};
+	};
+};
+
+/*
+ * PMIC
+ */
+
+/include/ "max77686.dtsi"
+
+&buck1 {
+	regulator-name = "VDD_MIF_1.0V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&buck2 {
+	regulator-name = "VDD_ARM_1.3V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&buck3 {
+	regulator-name = "VDD_INT_1.0V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&buck4 {
+	regulator-name = "VDD_G3D_1.0V";
+	regulator-boot-on;
+};
+
+&buck5 {
+	regulator-name = "VDDQ_CKEM1M2_1.2V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&buck6 {
+	regulator-name = "VDD_INL_1.35V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&buck7 {
+	regulator-name = "VDD_INL_2.0V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&buck8 {
+	regulator-name = "VDD_BUCK8_2.8V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&buck9 {
+	regulator-name = "VDD_BUCK9_1.2V";
+	regulator-always-on;
+	regulator-boot-on;
+};
+
+&ldo1 {
+	regulator-name = "VDD_ALIVE_1.0V";
+	regulator-always-on;
+};
+
+&ldo2 {
+	regulator-name = "VDDQ_M1M2_1.8V";
+	regulator-always-on;
+};
+
+&ldo3 {
+	regulator-name = "VDDQ_M0_1.8V";
+	regulator-always-on;
+};
+
+&ldo4 {
+	regulator-name = "VDDQ_MMC2_2.8V";
+	regulator-always-on;
+};
+
+&ldo5 {
+	regulator-name = "VDDQ_MMC13_1.8V";
+	regulator-always-on;
+};
+
+&ldo6 {
+	regulator-name = "VDD_MPLL_1.0V";
+	regulator-always-on;
+};
+
+&ldo7 {
+	regulator-name = "VDD_VPLL_1.0V";
+	regulator-always-on;
+};
+
+&ldo8 {
+	regulator-name = "VDD10_HDMI_1.0V";
+	regulator-always-on;
+};
+
+&ldo9 {
+	regulator-name = "VDD_VTCORE_1.0V";
+	regulator-always-on;
+};
+
+&ldo10 {
+	regulator-name = "VDDQ_MIPIHSI_1.8V";
+	regulator-always-on;
+};
+
+&ldo11 {
+	regulator-name = "VDD18_ABB1_1.8V";
+	regulator-always-on;
+};
+
+&ldo12 {
+	regulator-name = "VDD33_UOTG_3.3V";
+	regulator-always-on;
+};
+
+&ldo13 {
+	regulator-name = "VDDQ_C2C_1.8V";
+	regulator-always-on;
+};
+
+&ldo14 {
+	regulator-name = "VDD18_ABB2_1.8V";
+	regulator-always-on;
+};
+
+&ldo15 {
+	regulator-name = "VDD10_HSIC_1.0V";
+	regulator-always-on;
+};
+
+&ldo16 {
+	regulator-name = "VDD18_HSIC_1.8V";
+	regulator-always-on;
+};
+
+&ldo17 {
+	regulator-name = "VDDQ_CAM_1.8V";
+	regulator-always-on;
+};
+
+&ldo18 {
+	regulator-name = "VDD_LDO18_1.8V";
+	regulator-always-on;
+};
+
+&ldo19 {
+	regulator-name = "VDD_VTCAM_1.8V";
+	regulator-always-on;
+};
+
+&ldo20 {
+	regulator-name = "VDD_LDO20_1.8V";
+	regulator-always-on;
+};
+
+&ldo21 {
+	regulator-name = "VDD_SDCARD_3.3V";
+	regulator-always-on;
+};
+
+&ldo22 {
+	regulator-name = "VDD_LDO22_2.8V";
+	regulator-always-on;
+};
+
+&ldo23 {
+	regulator-name = "VDD_TOUCH_2.8V";
+	regulator-always-on;
+};
+
+&ldo24 {
+	regulator-name = "VDD_TOUCHLED_3.3V";
+	regulator-always-on;
+};
+
+&ldo25 {
+	regulator-name = "VDDQ_LCD_1.8V";
+	regulator-always-on;
+};
+
+&ldo26 {
+	regulator-name = "VDD_MOTOR_3.0V";
+	regulator-always-on;
 };
