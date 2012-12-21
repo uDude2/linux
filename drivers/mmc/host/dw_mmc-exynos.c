@@ -16,6 +16,7 @@
 #include <linux/mmc/dw_mmc.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
+#include <linux/pinctrl/consumer.h>
 
 #include "dw_mmc.h"
 #include "dw_mmc-pltfm.h"
@@ -49,6 +50,7 @@ struct dw_mci_exynos_priv_data {
 	u8				ciu_div;
 	u32				sdr_timing;
 	u32				ddr_timing;
+	struct pinctrl			*pctrl;
 };
 
 static struct dw_mci_exynos_compatible {
@@ -83,6 +85,10 @@ static int dw_mci_exynos_priv_init(struct dw_mci *host)
 					exynos_compat[idx].compatible))
 			priv->ctrl_type = exynos_compat[idx].ctrl_type;
 	}
+
+	priv->pctrl = devm_pinctrl_get_select_default(host->dev);
+	if (IS_ERR(priv->pctrl))
+		dev_dbg(host->dev, "no pinctrl node\n");
 
 	host->priv = priv;
 	return 0;
@@ -149,17 +155,44 @@ static int dw_mci_exynos_parse_dt(struct dw_mci *host)
 		return ret;
 
 	priv->ddr_timing = SDMMC_CLKSEL_TIMING(timing[0], timing[1], div);
+
 	return 0;
 }
 
 static int dw_mci_exynos_setup_bus(struct dw_mci *host,
 				struct device_node *slot_np, u8 bus_width)
 {
+	struct dw_mci_exynos_priv_data *priv = host->priv;
 	int idx, gpio, ret;
 
 	if (!slot_np)
 		return -EINVAL;
 
+	gpio = of_get_named_gpio(slot_np, "wp-gpios", 0);
+	if (gpio_is_valid(gpio)) {
+		if (devm_gpio_request(host->dev, gpio, "dw-mci-wp"))
+			dev_info(host->dev, "gpio [%d] request failed\n",
+						gpio);
+	} else {
+		dev_info(host->dev, "wp gpio not available");
+		host->pdata->quirks |= DW_MCI_QUIRK_NO_WRITE_PROTECT;
+	}
+
+	if (!IS_ERR(priv->pctrl))
+		return 0;
+
+	if (host->pdata->quirks & DW_MCI_QUIRK_BROKEN_CARD_DETECTION)
+		goto setup_bus;
+
+	gpio = of_get_named_gpio(slot_np, "samsung,cd-pinmux-gpio", 0);
+	if (gpio_is_valid(gpio)) {
+		if (devm_gpio_request(host->dev, gpio, "dw-mci-cd"))
+			dev_err(host->dev, "gpio [%d] request failed\n", gpio);
+	} else {
+		dev_info(host->dev, "cd gpio not available");
+	}
+
+ setup_bus:
 	/* cmd + clock + bus-width pins */
 	for (idx = 0; idx < NUM_PINS(bus_width); idx++) {
 		gpio = of_get_gpio(slot_np, idx);
@@ -173,27 +206,6 @@ static int dw_mci_exynos_setup_bus(struct dw_mci *host,
 			dev_err(host->dev, "gpio [%d] request failed\n", gpio);
 			return -EBUSY;
 		}
-	}
-
-	gpio = of_get_named_gpio(slot_np, "wp-gpios", 0);
-	if (gpio_is_valid(gpio)) {
-		if (devm_gpio_request(host->dev, gpio, "dw-mci-wp"))
-			dev_info(host->dev, "gpio [%d] request failed\n",
-						gpio);
-	} else {
-		dev_info(host->dev, "wp gpio not available");
-		host->pdata->quirks |= DW_MCI_QUIRK_NO_WRITE_PROTECT;
-	}
-
-	if (host->pdata->quirks & DW_MCI_QUIRK_BROKEN_CARD_DETECTION)
-		return 0;
-
-	gpio = of_get_named_gpio(slot_np, "samsung,cd-pinmux-gpio", 0);
-	if (gpio_is_valid(gpio)) {
-		if (devm_gpio_request(host->dev, gpio, "dw-mci-cd"))
-			dev_err(host->dev, "gpio [%d] request failed\n", gpio);
-	} else {
-		dev_info(host->dev, "cd gpio not available");
 	}
 
 	return 0;
