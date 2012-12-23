@@ -13,14 +13,21 @@
 
 #include <linux/of_platform.h>
 #include <linux/serial_core.h>
+#include <linux/platform_data/usb-ehci-s5p.h>
 
 #include <asm/mach/arch.h>
 #include <mach/map.h>
 
 #include <plat/cpu.h>
 #include <plat/regs-serial.h>
+#include <plat/usb-phy.h>
 
 #include "common.h"
+
+static struct s5p_ehci_platdata s5p_ehci_platdata = {
+	.phy_init = s5p_usb_phy_init,
+	.phy_exit = s5p_usb_phy_exit,
+};
 
 /*
  * The following lookup table is used to override device names when devices
@@ -79,6 +86,8 @@ static const struct of_dev_auxdata exynos4_auxdata_lookup[] __initconst = {
 	OF_DEV_AUXDATA("arm,pl330", EXYNOS4_PA_MDMA1, "dma-pl330.2", NULL),
 	OF_DEV_AUXDATA("samsung,exynos4210-tmu", EXYNOS4_PA_TMU,
 				"exynos-tmu", NULL),
+	OF_DEV_AUXDATA("samsung,exynos-ehci", EXYNOS4_PA_EHCI,
+				"s5p-ehci", &s5p_ehci_platdata),
 	{},
 };
 
