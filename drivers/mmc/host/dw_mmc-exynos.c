@@ -160,21 +160,6 @@ static int dw_mci_exynos_setup_bus(struct dw_mci *host,
 	if (!slot_np)
 		return -EINVAL;
 
-	/* cmd + clock + bus-width pins */
-	for (idx = 0; idx < NUM_PINS(bus_width); idx++) {
-		gpio = of_get_gpio(slot_np, idx);
-		if (!gpio_is_valid(gpio)) {
-			dev_err(host->dev, "invalid gpio: %d\n", gpio);
-			return -EINVAL;
-		}
-
-		ret = devm_gpio_request(host->dev, gpio, "dw-mci-bus");
-		if (ret) {
-			dev_err(host->dev, "gpio [%d] request failed\n", gpio);
-			return -EBUSY;
-		}
-	}
-
 	gpio = of_get_named_gpio(slot_np, "wp-gpios", 0);
 	if (gpio_is_valid(gpio)) {
 		if (devm_gpio_request(host->dev, gpio, "dw-mci-wp"))
