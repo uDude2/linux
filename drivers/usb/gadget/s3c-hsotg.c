@@ -3477,12 +3477,11 @@ static void s3c_hsotg_delete_debug(struct s3c_hsotg *hsotg)
 /**
  * s3c_hsotg_release - release callback for hsotg device
  * @dev: Device to for which release is called
+ *
+ * Nothing to do as the resource is allocated using devm_ API.
  */
 static void s3c_hsotg_release(struct device *dev)
 {
-	struct s3c_hsotg *hsotg = dev_get_drvdata(dev);
-
-	kfree(hsotg);
 }
 
 /**
@@ -3573,7 +3572,7 @@ static int s3c_hsotg_probe(struct platform_device *pdev)
 	for (i = 0; i < ARRAY_SIZE(hsotg->supplies); i++)
 		hsotg->supplies[i].supply = s3c_hsotg_supply_names[i];
 
-	ret = regulator_bulk_get(dev, ARRAY_SIZE(hsotg->supplies),
+	ret = devm_regulator_bulk_get(dev, ARRAY_SIZE(hsotg->supplies),
 				 hsotg->supplies);
 	if (ret) {
 		dev_err(dev, "failed to request supplies: %d\n", ret);
@@ -3663,8 +3662,6 @@ err_ep_mem:
 	kfree(eps);
 err_supplies:
 	s3c_hsotg_phy_disable(hsotg);
-	regulator_bulk_free(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
-
 err_clk:
 	clk_disable_unprepare(hsotg->clk);
 
@@ -3689,7 +3686,6 @@ static int s3c_hsotg_remove(struct platform_device *pdev)
 	}
 
 	s3c_hsotg_phy_disable(hsotg);
-	regulator_bulk_free(ARRAY_SIZE(hsotg->supplies), hsotg->supplies);
 
 	clk_disable_unprepare(hsotg->clk);
 
