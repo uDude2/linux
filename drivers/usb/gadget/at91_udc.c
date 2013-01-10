@@ -1981,7 +1981,17 @@ static struct platform_driver at91_udc_driver = {
 	},
 };
 
-module_platform_driver_probe(at91_udc_driver, at91udc_probe);
+static int __init udc_init_module(void)
+{
+	return platform_driver_probe(&at91_udc_driver, at91udc_probe);
+}
+module_init(udc_init_module);
+
+static void __exit udc_exit_module(void)
+{
+	platform_driver_unregister(&at91_udc_driver);
+}
+module_exit(udc_exit_module);
 
 MODULE_DESCRIPTION("AT91 udc driver");
 MODULE_AUTHOR("Thomas Rathbone, David Brownell");

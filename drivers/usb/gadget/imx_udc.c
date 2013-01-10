@@ -1556,7 +1556,17 @@ static struct platform_driver udc_driver = {
 	.resume		= imx_udc_resume,
 };
 
-module_platform_driver_probe(udc_driver, imx_udc_probe);
+static int __init udc_init(void)
+{
+	return platform_driver_probe(&udc_driver, imx_udc_probe);
+}
+module_init(udc_init);
+
+static void __exit udc_exit(void)
+{
+	platform_driver_unregister(&udc_driver);
+}
+module_exit(udc_exit);
 
 MODULE_DESCRIPTION("IMX USB Device Controller driver");
 MODULE_AUTHOR("Darius Augulis <augulis.darius@gmail.com>");

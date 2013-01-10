@@ -2066,7 +2066,17 @@ static struct platform_driver udc_driver = {
 	},
 };
 
-module_platform_driver_probe(udc_driver, usba_udc_probe);
+static int __init udc_init(void)
+{
+	return platform_driver_probe(&udc_driver, usba_udc_probe);
+}
+module_init(udc_init);
+
+static void __exit udc_exit(void)
+{
+	platform_driver_unregister(&udc_driver);
+}
+module_exit(udc_exit);
 
 MODULE_DESCRIPTION("Atmel USBA UDC driver");
 MODULE_AUTHOR("Haavard Skinnemoen (Atmel)");
