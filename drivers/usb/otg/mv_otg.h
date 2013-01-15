@@ -149,6 +149,9 @@ struct mv_otg {
 	u32 irq_status;
 	u32 irq_en;
 
+	unsigned int extern_attr;
+	struct notifier_block notifier;
+
 	struct delayed_work work;
 	struct workqueue_struct *qwork;
 
