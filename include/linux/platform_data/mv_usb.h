@@ -47,9 +47,12 @@ struct mv_usb_platform_data {
 	/* Force a_bus_req to be asserted */
 	 unsigned int    otg_force_a_bus_req:1;
 
-	int	(*phy_init)(void __iomem *regbase);
-	void	(*phy_deinit)(void __iomem *regbase);
 	int	(*set_vbus)(unsigned int vbus);
-	int     (*private_init)(void __iomem *opregs, void __iomem *phyregs);
 };
+
+struct mv_usb_phy_platform_data {
+	unsigned int	clknum;
+	char		**clkname;
+};
+
 #endif

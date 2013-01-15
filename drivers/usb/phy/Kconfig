@@ -45,3 +45,10 @@ config USB_RCAR_PHY
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called rcar-phy.
+
+config MV_USB2_PHY
+	bool "Marvell USB 2.0 PHY Driver"
+	depends on USB || USB_GADGET
+	help
+	  Enable this to support Marvell USB 2.0 phy driver for Marvell
+	  SoC.
