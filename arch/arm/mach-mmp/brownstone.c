@@ -212,10 +212,8 @@ static struct mv_usb_phy_platform_data brownstone_usb_phy_pdata = {
 static struct mv_usb_platform_data brownstone_usb_pdata = {
 	.clknum		= 1,
 	.clkname	= mmp2_usb_clock_name,
-	.vbus		= NULL,
 	.mode		= MV_USB_MODE_OTG,
 	.otg_force_a_bus_req = 1,
-	.set_vbus	= NULL,
 };
 #endif
 #endif
