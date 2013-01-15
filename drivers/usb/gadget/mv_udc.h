@@ -179,6 +179,7 @@ struct mv_udc {
 	int				irq;
 
 	unsigned int			extern_attr;
+	unsigned int			mode;
 	struct notifier_block		notifier;
 
 	struct mv_cap_regs __iomem	*cap_regs;
@@ -222,11 +223,9 @@ struct mv_udc {
 	struct mv_usb2_phy	*phy;
 	struct usb_phy		*transceiver;
 
-	struct mv_usb_platform_data     *pdata;
-
 	/* some SOC has mutiple clock sources for USB*/
 	unsigned int    clknum;
-	struct clk      *clk[0];
+	struct clk      **clk;
 };
 
 /* endpoint data structure */
