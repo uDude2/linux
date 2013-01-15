@@ -15,17 +15,18 @@
 #include <linux/clk.h>
 #include <linux/err.h>
 #include <linux/usb/otg.h>
+#include <linux/usb/mv_usb2.h>
 #include <linux/platform_data/mv_usb.h>
 
 #define CAPLENGTH_MASK         (0xff)
 
 struct ehci_hcd_mv {
 	struct usb_hcd *hcd;
+	struct mv_usb2_phy *mvphy;
 
 	/* Which mode does this ehci running OTG/Host ? */
 	int mode;
 
-	void __iomem *phy_regs;
 	void __iomem *cap_regs;
 	void __iomem *op_regs;
 
@@ -59,8 +60,8 @@ static int mv_ehci_enable(struct ehci_hcd_mv *ehci_mv)
 	int retval;
 
 	ehci_clock_enable(ehci_mv);
-	if (ehci_mv->pdata->phy_init) {
-		retval = ehci_mv->pdata->phy_init(ehci_mv->phy_regs);
+	if (ehci_mv->mvphy->init) {
+		retval = ehci_mv->mvphy->init(ehci_mv->mvphy);
 		if (retval)
 			return retval;
 	}
@@ -70,8 +71,8 @@ static int mv_ehci_enable(struct ehci_hcd_mv *ehci_mv)
 
 static void mv_ehci_disable(struct ehci_hcd_mv *ehci_mv)
 {
-	if (ehci_mv->pdata->phy_deinit)
-		ehci_mv->pdata->phy_deinit(ehci_mv->phy_regs);
+	if (ehci_mv->mvphy->shutdown)
+		ehci_mv->mvphy->shutdown(ehci_mv->mvphy);
 	ehci_clock_disable(ehci_mv);
 }
 
@@ -184,22 +185,7 @@ static int mv_ehci_probe(struct platform_device *pdev)
 		}
 	}
 
-	r = platform_get_resource_byname(pdev, IORESOURCE_MEM, "phyregs");
-	if (r == NULL) {
-		dev_err(&pdev->dev, "no phy I/O memory resource defined\n");
-		retval = -ENODEV;
-		goto err_clear_drvdata;
-	}
-
-	ehci_mv->phy_regs = devm_ioremap(&pdev->dev, r->start,
-					 resource_size(r));
-	if (ehci_mv->phy_regs == 0) {
-		dev_err(&pdev->dev, "failed to map phy I/O memory\n");
-		retval = -EFAULT;
-		goto err_clear_drvdata;
-	}
-
-	r = platform_get_resource_byname(pdev, IORESOURCE_MEM, "capregs");
+	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!r) {
 		dev_err(&pdev->dev, "no I/O memory resource defined\n");
 		retval = -ENODEV;
@@ -211,6 +197,12 @@ static int mv_ehci_probe(struct platform_device *pdev)
 	if (ehci_mv->cap_regs == NULL) {
 		dev_err(&pdev->dev, "failed to map I/O memory\n");
 		retval = -EFAULT;
+		goto err_clear_drvdata;
+	}
+
+	ehci_mv->mvphy = mv_usb2_get_phy();
+	if (ehci_mv->mvphy == NULL) {
+		retval = -ENODEV;
 		goto err_clear_drvdata;
 	}
 
@@ -274,9 +266,6 @@ static int mv_ehci_probe(struct platform_device *pdev)
 			goto err_set_vbus;
 		}
 	}
-
-	if (pdata->private_init)
-		pdata->private_init(ehci_mv->op_regs, ehci_mv->phy_regs);
 
 	dev_info(&pdev->dev,
 		 "successful find EHCI device with regs 0x%p irq %d"
