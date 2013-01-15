@@ -2077,15 +2077,16 @@ static irqreturn_t mv_udc_irq(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t mv_udc_vbus_irq(int irq, void *dev)
+static int mv_udc_vbus_notifier_call(struct notifier_block *nb,
+				unsigned long val, void *v)
 {
-	struct mv_udc *udc = (struct mv_udc *)dev;
+	struct mv_udc *udc = container_of(nb, struct mv_udc, notifier);
 
 	/* polling VBUS and init phy may cause too much time*/
-	if (udc->qwork)
+	if (udc->qwork && val == EVENT_VBUS)
 		queue_work(udc->qwork, &udc->vbus_work);
 
-	return IRQ_HANDLED;
+	return 0;
 }
 
 static void mv_udc_vbus_work(struct work_struct *work)
@@ -2094,10 +2095,12 @@ static void mv_udc_vbus_work(struct work_struct *work)
 	unsigned int vbus;
 
 	udc = container_of(work, struct mv_udc, vbus_work);
-	if (!udc->pdata->vbus)
+	if (!(udc->extern_attr & MV_USB_HAS_VBUS_DETECTION))
 		return;
 
-	vbus = udc->pdata->vbus->poll();
+	if (mv_usb2_extern_call(udc->phy, vbus, get_vbus, &vbus))
+		return;
+
 	dev_info(&udc->dev->dev, "vbus is %d\n", vbus);
 
 	if (vbus == VBUS_HIGH)
@@ -2123,6 +2126,9 @@ static int mv_udc_remove(struct platform_device *pdev)
 	udc = platform_get_drvdata(pdev);
 
 	usb_del_gadget_udc(&udc->gadget);
+
+	if (udc->extern_attr & MV_USB_HAS_VBUS_DETECTION)
+		mv_usb2_unregister_notifier(udc->phy, &udc->notifier);
 
 	if (udc->qwork) {
 		flush_workqueue(udc->qwork);
@@ -2169,6 +2175,7 @@ static int mv_udc_probe(struct platform_device *pdev)
 	}
 
 	udc->done = &release_done;
+	udc->extern_attr = pdata->extern_attr;
 	udc->pdata = pdev->dev.platform_data;
 	spin_lock_init(&udc->lock);
 
@@ -2319,17 +2326,8 @@ static int mv_udc_probe(struct platform_device *pdev)
 	/* VBUS detect: we can disable/enable clock on demand.*/
 	if (udc->transceiver)
 		udc->clock_gating = 1;
-	else if (pdata->vbus) {
+	else if (udc->extern_attr & MV_USB_HAS_VBUS_DETECTION) {
 		udc->clock_gating = 1;
-		retval = devm_request_threaded_irq(&pdev->dev,
-				pdata->vbus->irq, NULL,
-				mv_udc_vbus_irq, IRQF_ONESHOT, "vbus", udc);
-		if (retval) {
-			dev_info(&pdev->dev,
-				"Can not request irq for VBUS, "
-				"disable clock gating\n");
-			udc->clock_gating = 0;
-		}
 
 		udc->qwork = create_singlethread_workqueue("mv_udc_queue");
 		if (!udc->qwork) {
@@ -2339,6 +2337,8 @@ static int mv_udc_probe(struct platform_device *pdev)
 		}
 
 		INIT_WORK(&udc->vbus_work, mv_udc_vbus_work);
+		udc->notifier.notifier_call = mv_udc_vbus_notifier_call;
+		mv_usb2_register_notifier(udc->phy, &udc->notifier);
 	}
 
 	/*
@@ -2362,6 +2362,9 @@ static int mv_udc_probe(struct platform_device *pdev)
 	return 0;
 
 err_create_workqueue:
+	if (!udc->transceiver
+		&& (udc->extern_attr & MV_USB_HAS_VBUS_DETECTION))
+		mv_usb2_unregister_notifier(udc->phy, &udc->notifier);
 	destroy_workqueue(udc->qwork);
 err_unregister:
 	device_unregister(&udc->gadget.dev);
@@ -2380,6 +2383,7 @@ err_disable_clock:
 static int mv_udc_suspend(struct device *dev)
 {
 	struct mv_udc *udc;
+	unsigned int vbus;
 
 	udc = dev_get_drvdata(dev);
 
@@ -2387,11 +2391,16 @@ static int mv_udc_suspend(struct device *dev)
 	if (udc->transceiver)
 		return 0;
 
-	if (udc->pdata->vbus && udc->pdata->vbus->poll)
-		if (udc->pdata->vbus->poll() == VBUS_HIGH) {
+	if ((udc->extern_attr & MV_USB_HAS_VBUS_DETECTION) &&
+		mv_usb2_has_extern_call(udc->phy, vbus, get_vbus)) {
+		if (mv_usb2_extern_call(udc->phy, vbus, get_vbus, &vbus))
+			return -EAGAIN;
+
+		if (vbus == VBUS_HIGH) {
 			dev_info(&udc->dev->dev, "USB cable is connected!\n");
 			return -EAGAIN;
 		}
+	}
 
 	/*
 	 * only cable is unplugged, udc can suspend.

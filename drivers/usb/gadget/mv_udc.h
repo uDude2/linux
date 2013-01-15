@@ -178,6 +178,9 @@ struct mv_udc {
 	struct platform_device		*dev;
 	int				irq;
 
+	unsigned int			extern_attr;
+	struct notifier_block		notifier;
+
 	struct mv_cap_regs __iomem	*cap_regs;
 	struct mv_op_regs __iomem	*op_regs;
 	unsigned int			max_eps;
