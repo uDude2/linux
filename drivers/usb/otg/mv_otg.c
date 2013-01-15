@@ -25,6 +25,7 @@
 #include <linux/usb/otg.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/hcd.h>
+#include <linux/usb/mv_usb2.h>
 #include <linux/platform_data/mv_usb.h>
 
 #include "mv_otg.h"
@@ -261,8 +262,8 @@ static int mv_otg_enable_internal(struct mv_otg *mvotg)
 	dev_dbg(&mvotg->pdev->dev, "otg enabled\n");
 
 	otg_clock_enable(mvotg);
-	if (mvotg->pdata->phy_init) {
-		retval = mvotg->pdata->phy_init(mvotg->phy_regs);
+	if (mvotg->mvphy->init) {
+		retval = mvotg->mvphy->init(mvotg->mvphy);
 		if (retval) {
 			dev_err(&mvotg->pdev->dev,
 				"init phy error %d\n", retval);
@@ -288,8 +289,8 @@ static void mv_otg_disable_internal(struct mv_otg *mvotg)
 {
 	if (mvotg->active) {
 		dev_dbg(&mvotg->pdev->dev, "otg disabled\n");
-		if (mvotg->pdata->phy_deinit)
-			mvotg->pdata->phy_deinit(mvotg->phy_regs);
+		if (mvotg->mvphy->shutdown)
+			mvotg->mvphy->shutdown(mvotg->mvphy);
 		otg_clock_disable(mvotg);
 		mvotg->active = 0;
 	}
@@ -741,23 +742,8 @@ static int mv_otg_probe(struct platform_device *pdev)
 	for (i = 0; i < OTG_TIMER_NUM; i++)
 		init_timer(&mvotg->otg_ctrl.timer[i]);
 
-	r = platform_get_resource_byname(mvotg->pdev,
-					 IORESOURCE_MEM, "phyregs");
-	if (r == NULL) {
-		dev_err(&pdev->dev, "no phy I/O memory resource defined\n");
-		retval = -ENODEV;
-		goto err_destroy_workqueue;
-	}
-
-	mvotg->phy_regs = devm_ioremap(&pdev->dev, r->start, resource_size(r));
-	if (mvotg->phy_regs == NULL) {
-		dev_err(&pdev->dev, "failed to map phy I/O memory\n");
-		retval = -EFAULT;
-		goto err_destroy_workqueue;
-	}
-
-	r = platform_get_resource_byname(mvotg->pdev,
-					 IORESOURCE_MEM, "capregs");
+	r = platform_get_resource(mvotg->pdev,
+					 IORESOURCE_MEM, 0);
 	if (r == NULL) {
 		dev_err(&pdev->dev, "no I/O memory resource defined\n");
 		retval = -ENODEV;
@@ -768,6 +754,11 @@ static int mv_otg_probe(struct platform_device *pdev)
 	if (mvotg->cap_regs == NULL) {
 		dev_err(&pdev->dev, "failed to map I/O memory\n");
 		retval = -EFAULT;
+		goto err_destroy_workqueue;
+	}
+	mvotg->mvphy = mv_usb2_get_phy();
+	if (mvotg->mvphy == NULL) {
+		retval = -ENODEV;
 		goto err_destroy_workqueue;
 	}
 
