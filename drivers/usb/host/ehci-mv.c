@@ -256,8 +256,8 @@ static int mv_ehci_probe(struct platform_device *pdev)
 		goto err_disable_clk;
 #endif
 	} else {
-		if (pdata->set_vbus)
-			pdata->set_vbus(1);
+		if (mv_usb2_has_extern_call(ehci_mv->mvphy, vbus, set_vbus))
+			mv_usb2_extern_call(ehci_mv->mvphy, vbus, set_vbus, 1);
 
 		retval = usb_add_hcd(hcd, hcd->irq, IRQF_SHARED);
 		if (retval) {
@@ -275,8 +275,8 @@ static int mv_ehci_probe(struct platform_device *pdev)
 	return 0;
 
 err_set_vbus:
-	if (pdata->set_vbus)
-		pdata->set_vbus(0);
+	if (mv_usb2_has_extern_call(ehci_mv->mvphy, vbus, set_vbus))
+		mv_usb2_extern_call(ehci_mv->mvphy, vbus, set_vbus, 0);
 err_disable_clk:
 	mv_ehci_disable(ehci_mv);
 err_clear_drvdata:
@@ -299,8 +299,8 @@ static int mv_ehci_remove(struct platform_device *pdev)
 		otg_set_host(ehci_mv->otg->otg, NULL);
 
 	if (ehci_mv->mode == MV_USB_MODE_HOST) {
-		if (ehci_mv->pdata->set_vbus)
-			ehci_mv->pdata->set_vbus(0);
+		if (mv_usb2_has_extern_call(ehci_mv->mvphy, vbus, set_vbus))
+			mv_usb2_extern_call(ehci_mv->mvphy, vbus, set_vbus, 1);
 
 		mv_ehci_disable(ehci_mv);
 	}
