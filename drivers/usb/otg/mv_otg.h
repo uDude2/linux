@@ -157,12 +157,12 @@ struct mv_otg {
 
 	spinlock_t wq_lock;
 
-	struct mv_usb_platform_data *pdata;
-
 	unsigned int active;
 	unsigned int clock_gating;
+	unsigned int mode;
+	unsigned int otg_force_a_bus_req;
 	unsigned int clknum;
-	struct clk *clk[0];
+	struct clk **clk;
 };
 
 #endif
