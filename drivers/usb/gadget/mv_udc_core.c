@@ -35,6 +35,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/platform_data/mv_usb.h>
+#include <linux/usb/mv_usb2.h>
 #include <asm/unaligned.h>
 
 #include "mv_udc.h"
@@ -1121,8 +1122,8 @@ static int mv_udc_enable_internal(struct mv_udc *udc)
 
 	dev_dbg(&udc->dev->dev, "enable udc\n");
 	udc_clock_enable(udc);
-	if (udc->pdata->phy_init) {
-		retval = udc->pdata->phy_init(udc->phy_regs);
+	if (udc->phy->init) {
+		retval = udc->phy->init(udc->phy);
 		if (retval) {
 			dev_err(&udc->dev->dev,
 				"init phy error %d\n", retval);
@@ -1147,8 +1148,8 @@ static void mv_udc_disable_internal(struct mv_udc *udc)
 {
 	if (udc->active) {
 		dev_dbg(&udc->dev->dev, "disable udc\n");
-		if (udc->pdata->phy_deinit)
-			udc->pdata->phy_deinit(udc->phy_regs);
+		if (udc->phy->shutdown)
+			udc->phy->shutdown(udc->phy);
 		udc_clock_disable(udc);
 		udc->active = 0;
 	}
@@ -2194,7 +2195,7 @@ static int mv_udc_probe(struct platform_device *pdev)
 		}
 	}
 
-	r = platform_get_resource_byname(udc->dev, IORESOURCE_MEM, "capregs");
+	r = platform_get_resource(udc->dev, IORESOURCE_MEM, 0);
 	if (r == NULL) {
 		dev_err(&pdev->dev, "no I/O memory resource defined\n");
 		return -ENODEV;
@@ -2207,17 +2208,9 @@ static int mv_udc_probe(struct platform_device *pdev)
 		return -EBUSY;
 	}
 
-	r = platform_get_resource_byname(udc->dev, IORESOURCE_MEM, "phyregs");
-	if (r == NULL) {
-		dev_err(&pdev->dev, "no phy I/O memory resource defined\n");
+	udc->phy = mv_usb2_get_phy();
+	if (udc->phy == NULL)
 		return -ENODEV;
-	}
-
-	udc->phy_regs = ioremap(r->start, resource_size(r));
-	if (udc->phy_regs == NULL) {
-		dev_err(&pdev->dev, "failed to map phy I/O memory\n");
-		return -EBUSY;
-	}
 
 	/* we will acces controller register, so enable the clk */
 	retval = mv_udc_enable_internal(udc);
