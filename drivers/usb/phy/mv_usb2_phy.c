@@ -136,6 +136,53 @@ struct mv_usb2_phy *mv_usb2_get_phy(void)
 }
 EXPORT_SYMBOL(mv_usb2_get_phy);
 
+int mv_usb2_register_notifier(struct mv_usb2_phy *phy,
+		struct notifier_block *nb)
+{
+	int ret;
+
+	if (!phy)
+		return -ENODEV;
+
+	ret = atomic_notifier_chain_register(phy->extern_chip.head, nb);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+EXPORT_SYMBOL(mv_usb2_register_notifier);
+
+int mv_usb2_unregister_notifier(struct mv_usb2_phy *phy,
+		struct notifier_block *nb)
+{
+	int ret;
+
+	if (!phy)
+		return -ENODEV;
+
+	ret = atomic_notifier_chain_unregister(phy->extern_chip.head, nb);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+EXPORT_SYMBOL(mv_usb2_unregister_notifier);
+
+int mv_usb2_notify(struct mv_usb2_phy *phy, unsigned long val, void *v)
+{
+	int ret;
+
+	if (!phy)
+		return -ENODEV;
+
+	ret = atomic_notifier_call_chain(phy->extern_chip.head, val, v);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+EXPORT_SYMBOL(mv_usb2_notify);
+
 static unsigned int u2o_get(void __iomem *base, unsigned int offset)
 {
 	return readl_relaxed(base + offset);
@@ -413,6 +460,13 @@ static int __devinit usb_phy_probe(struct platform_device *pdev)
 	mv_phy->pdev = pdev;
 	mv_phy->init = usb_phy_init;
 	mv_phy->shutdown = usb_phy_shutdown;
+
+	mv_phy->extern_chip.head = devm_kzalloc(&pdev->dev,
+					sizeof(*mv_phy->extern_chip.head),
+					GFP_KERNEL);
+	if (mv_phy->extern_chip.head == NULL)
+		return -ENOMEM;
+	ATOMIC_INIT_NOTIFIER_HEAD(mv_phy->extern_chip.head);
 
 	platform_set_drvdata(pdev, mv_phy);
 
