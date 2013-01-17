@@ -369,7 +369,7 @@ static int omap2430_musb_init(struct musb *musb)
 	musb->xceiv = devm_usb_get_phy(dev, USB_PHY_TYPE_USB2);
 	if (IS_ERR_OR_NULL(musb->xceiv)) {
 		pr_err("HS USB OTG: no transceiver configured\n");
-		return -ENODEV;
+		return -EPROBE_DEFER;
 	}
 
 	musb->isr = omap2430_musb_interrupt;
@@ -543,7 +543,7 @@ static int omap2430_probe(struct platform_device *pdev)
 		}
 
 		config = devm_kzalloc(&pdev->dev, sizeof(*config), GFP_KERNEL);
-		if (!data) {
+		if (!config) {
 			dev_err(&pdev->dev,
 				"failed to allocate musb hdrc config\n");
 			goto err2;

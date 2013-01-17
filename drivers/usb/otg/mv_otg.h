@@ -137,10 +137,10 @@ struct mv_otg_regs {
 
 struct mv_otg {
 	struct usb_phy phy;
+	struct mv_usb2_phy *mvphy;
 	struct mv_otg_ctrl otg_ctrl;
 
 	/* base address */
-	void __iomem *phy_regs;
 	void __iomem *cap_regs;
 	struct mv_otg_regs __iomem *op_regs;
 
@@ -149,17 +149,20 @@ struct mv_otg {
 	u32 irq_status;
 	u32 irq_en;
 
+	unsigned int extern_attr;
+	struct notifier_block notifier;
+
 	struct delayed_work work;
 	struct workqueue_struct *qwork;
 
 	spinlock_t wq_lock;
 
-	struct mv_usb_platform_data *pdata;
-
 	unsigned int active;
 	unsigned int clock_gating;
+	unsigned int mode;
+	unsigned int otg_force_a_bus_req;
 	unsigned int clknum;
-	struct clk *clk[0];
+	struct clk **clk;
 };
 
 #endif

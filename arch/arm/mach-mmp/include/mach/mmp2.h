@@ -31,6 +31,10 @@ extern struct pxa_device_desc mmp2_device_sdh2;
 extern struct pxa_device_desc mmp2_device_sdh3;
 extern struct pxa_device_desc mmp2_device_asram;
 extern struct pxa_device_desc mmp2_device_isram;
+extern struct pxa_device_desc mmp2_device_u2o;
+extern struct pxa_device_desc mmp2_device_u2ootg;
+extern struct pxa_device_desc mmp2_device_u2oehci;
+extern struct pxa_device_desc mmp2_device_u2ophy;
 
 extern struct platform_device mmp2_device_gpio;
 

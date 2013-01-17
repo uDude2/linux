@@ -880,6 +880,8 @@ int usb_gadget_unregister_driver(struct usb_gadget_driver *driver);
 
 extern int usb_add_gadget_udc(struct device *parent, struct usb_gadget *gadget);
 extern void usb_del_gadget_udc(struct usb_gadget *gadget);
+extern int udc_attach_driver(const char *name,
+		struct usb_gadget_driver *driver);
 
 /*-------------------------------------------------------------------------*/
 
@@ -909,6 +911,11 @@ struct usb_string {
 struct usb_gadget_strings {
 	u16			language;	/* 0x0409 for en-us */
 	struct usb_string	*strings;
+};
+
+struct usb_gadget_string_container {
+	struct list_head        list;
+	u8                      *stash[0];
 };
 
 /* put descriptor for string with that id into buf (buflen >= 256) */

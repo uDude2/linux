@@ -17,6 +17,7 @@
 #include <linux/device.h>
 #include <linux/proc_fs.h>
 #include <linux/clk.h>
+#include <linux/of.h>
 #include <linux/workqueue.h>
 #include <linux/platform_device.h>
 
@@ -25,6 +26,7 @@
 #include <linux/usb/otg.h>
 #include <linux/usb/gadget.h>
 #include <linux/usb/hcd.h>
+#include <linux/usb/mv_usb2.h>
 #include <linux/platform_data/mv_usb.h>
 
 #include "mv_otg.h"
@@ -58,10 +60,10 @@ static char *state_string[] = {
 static int mv_otg_set_vbus(struct usb_otg *otg, bool on)
 {
 	struct mv_otg *mvotg = container_of(otg->phy, struct mv_otg, phy);
-	if (mvotg->pdata->set_vbus == NULL)
+	if (!mv_usb2_has_extern_call(mvotg->mvphy, vbus, set_vbus))
 		return -ENODEV;
 
-	return mvotg->pdata->set_vbus(on);
+	return mv_usb2_extern_call(mvotg->mvphy, vbus, set_vbus, on);
 }
 
 static int mv_otg_set_host(struct usb_otg *otg,
@@ -183,14 +185,14 @@ static void mv_otg_init_irq(struct mv_otg *mvotg)
 	mvotg->irq_status = OTGSC_INTSTS_A_SESSION_VALID
 	    | OTGSC_INTSTS_A_VBUS_VALID;
 
-	if (mvotg->pdata->vbus == NULL) {
+	if (!(mvotg->extern_attr & MV_USB_HAS_VBUS_DETECTION)) {
 		mvotg->irq_en |= OTGSC_INTR_B_SESSION_VALID
 		    | OTGSC_INTR_B_SESSION_END;
 		mvotg->irq_status |= OTGSC_INTSTS_B_SESSION_VALID
 		    | OTGSC_INTSTS_B_SESSION_END;
 	}
 
-	if (mvotg->pdata->id == NULL) {
+	if (!(mvotg->extern_attr & MV_USB_HAS_IDPIN_DETECTION)) {
 		mvotg->irq_en |= OTGSC_INTR_USB_ID;
 		mvotg->irq_status |= OTGSC_INTSTS_USB_ID;
 	}
@@ -261,8 +263,8 @@ static int mv_otg_enable_internal(struct mv_otg *mvotg)
 	dev_dbg(&mvotg->pdev->dev, "otg enabled\n");
 
 	otg_clock_enable(mvotg);
-	if (mvotg->pdata->phy_init) {
-		retval = mvotg->pdata->phy_init(mvotg->phy_regs);
+	if (mvotg->mvphy->init) {
+		retval = mvotg->mvphy->init(mvotg->mvphy);
 		if (retval) {
 			dev_err(&mvotg->pdev->dev,
 				"init phy error %d\n", retval);
@@ -288,8 +290,8 @@ static void mv_otg_disable_internal(struct mv_otg *mvotg)
 {
 	if (mvotg->active) {
 		dev_dbg(&mvotg->pdev->dev, "otg disabled\n");
-		if (mvotg->pdata->phy_deinit)
-			mvotg->pdata->phy_deinit(mvotg->phy_regs);
+		if (mvotg->mvphy->shutdown)
+			mvotg->mvphy->shutdown(mvotg->mvphy);
 		otg_clock_disable(mvotg);
 		mvotg->active = 0;
 	}
@@ -305,11 +307,14 @@ static void mv_otg_update_inputs(struct mv_otg *mvotg)
 {
 	struct mv_otg_ctrl *otg_ctrl = &mvotg->otg_ctrl;
 	u32 otgsc;
+	unsigned int vbus, idpin;
 
 	otgsc = readl(&mvotg->op_regs->otgsc);
 
-	if (mvotg->pdata->vbus) {
-		if (mvotg->pdata->vbus->poll() == VBUS_HIGH) {
+	if (mvotg->extern_attr & MV_USB_HAS_VBUS_DETECTION) {
+		if (mv_usb2_extern_call(mvotg->mvphy, vbus, get_vbus, &vbus))
+			return;
+		if (vbus == VBUS_HIGH) {
 			otg_ctrl->b_sess_vld = 1;
 			otg_ctrl->b_sess_end = 0;
 		} else {
@@ -321,12 +326,15 @@ static void mv_otg_update_inputs(struct mv_otg *mvotg)
 		otg_ctrl->b_sess_end = !!(otgsc & OTGSC_STS_B_SESSION_END);
 	}
 
-	if (mvotg->pdata->id)
-		otg_ctrl->id = !!mvotg->pdata->id->poll();
+	if (mvotg->extern_attr & MV_USB_HAS_IDPIN_DETECTION) {
+		if (mv_usb2_extern_call(mvotg->mvphy, idpin, get_idpin, &idpin))
+			return;
+		otg_ctrl->id = !!idpin;
+	}
 	else
 		otg_ctrl->id = !!(otgsc & OTGSC_STS_USB_ID);
 
-	if (mvotg->pdata->otg_force_a_bus_req && !otg_ctrl->id)
+	if (mvotg->otg_force_a_bus_req && !otg_ctrl->id)
 		otg_ctrl->a_bus_req = 1;
 
 	otg_ctrl->a_sess_vld = !!(otgsc & OTGSC_STS_A_SESSION_VALID);
@@ -504,7 +512,7 @@ static irqreturn_t mv_otg_irq(int irq, void *dev)
 	 * if we have vbus, then the vbus detection for B-device
 	 * will be done by mv_otg_inputs_irq().
 	 */
-	if (mvotg->pdata->vbus)
+	if (mvotg->extern_attr & MV_USB_HAS_VBUS_DETECTION)
 		if ((otgsc & OTGSC_STS_USB_ID) &&
 		    !(otgsc & OTGSC_INTSTS_USB_ID))
 			return IRQ_NONE;
@@ -517,9 +525,10 @@ static irqreturn_t mv_otg_irq(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static irqreturn_t mv_otg_inputs_irq(int irq, void *dev)
+static int mv_otg_notifier_call(struct notifier_block *nb,
+				unsigned long val, void *v)
 {
-	struct mv_otg *mvotg = dev;
+	struct mv_otg *mvotg = container_of(nb, struct mv_otg, notifier);
 
 	/* The clock may disabled at this time */
 	if (!mvotg->active) {
@@ -529,7 +538,7 @@ static irqreturn_t mv_otg_inputs_irq(int irq, void *dev)
 
 	mv_otg_run_state_machine(mvotg, 0);
 
-	return IRQ_HANDLED;
+	return 0;
 }
 
 static ssize_t
@@ -662,17 +671,12 @@ static struct attribute_group inputs_attr_group = {
 int mv_otg_remove(struct platform_device *pdev)
 {
 	struct mv_otg *mvotg = platform_get_drvdata(pdev);
-	int clk_i;
 
 	sysfs_remove_group(&mvotg->pdev->dev.kobj, &inputs_attr_group);
 
-	if (mvotg->irq)
-		free_irq(mvotg->irq, mvotg);
-
-	if (mvotg->pdata->vbus)
-		free_irq(mvotg->pdata->vbus->irq, mvotg);
-	if (mvotg->pdata->id)
-		free_irq(mvotg->pdata->id->irq, mvotg);
+	if ((mvotg->extern_attr & MV_USB_HAS_VBUS_DETECTION) ||
+		(mvotg->extern_attr & MV_USB_HAS_IDPIN_DETECTION))
+		mv_usb2_unregister_notifier(mvotg->mvphy, &mvotg->notifier);
 
 	if (mvotg->qwork) {
 		flush_workqueue(mvotg->qwork);
@@ -681,70 +685,133 @@ int mv_otg_remove(struct platform_device *pdev)
 
 	mv_otg_disable(mvotg);
 
-	if (mvotg->cap_regs)
-		iounmap(mvotg->cap_regs);
-
-	if (mvotg->phy_regs)
-		iounmap(mvotg->phy_regs);
-
-	for (clk_i = 0; clk_i <= mvotg->clknum; clk_i++)
-		clk_put(mvotg->clk[clk_i]);
-
 	usb_remove_phy(&mvotg->phy);
 	platform_set_drvdata(pdev, NULL);
 
-	kfree(mvotg->phy.otg);
-	kfree(mvotg);
+	return 0;
+}
+
+static int mv_otg_parse_dt(struct platform_device *pdev,
+				struct mv_otg *mvotg)
+{
+	struct device_node *np = pdev->dev.of_node;
+	unsigned int clks_num;
+	unsigned int val;
+	int i, ret;
+	const char *clk_name;
+
+	if (!np)
+		return 1;
+
+	clks_num = of_property_count_strings(np, "clocks");
+	if (clks_num < 0)
+		return clks_num;
+
+	mvotg->clk = devm_kzalloc(&pdev->dev,
+		sizeof(struct clk *) * clks_num, GFP_KERNEL);
+	if (mvotg->clk == NULL)
+		return -ENOMEM;
+
+	for (i = 0; i < clks_num; i++) {
+		ret = of_property_read_string_index(np, "clocks", i,
+			&clk_name);
+		if (ret)
+			return ret;
+		mvotg->clk[i] = devm_clk_get(&pdev->dev, clk_name);
+		if (IS_ERR(mvotg->clk[i]))
+			return PTR_ERR(mvotg->clk[i]);
+	}
+
+	mvotg->clknum = clks_num;
+
+	ret = of_property_read_u32(np, "extern_attr", &mvotg->extern_attr);
+	if (ret)
+		return ret;
+
+	ret = of_property_read_u32(np, "mode", &mvotg->mode);
+	if (ret)
+		return ret;
+
+	ret = of_property_read_u32(np, "force_a_bus_req", &val);
+	if (ret)
+		return ret;
+	mvotg->otg_force_a_bus_req = !!val;
+
+	ret = of_property_read_u32(np, "disable_clock_gating", &val);
+	if (ret)
+		return ret;
+	mvotg->clock_gating = !val;
 
 	return 0;
 }
 
 static int mv_otg_probe(struct platform_device *pdev)
 {
-	struct mv_usb_platform_data *pdata = pdev->dev.platform_data;
 	struct mv_otg *mvotg;
 	struct usb_otg *otg;
 	struct resource *r;
-	int retval = 0, clk_i, i;
+	int retval = 0, i;
 	size_t size;
 
-	if (pdata == NULL) {
-		dev_err(&pdev->dev, "failed to get platform data\n");
-		return -ENODEV;
-	}
-
-	size = sizeof(*mvotg) + sizeof(struct clk *) * pdata->clknum;
-	mvotg = kzalloc(size, GFP_KERNEL);
+	size = sizeof(*mvotg);
+	mvotg = devm_kzalloc(&pdev->dev, size, GFP_KERNEL);
 	if (!mvotg) {
 		dev_err(&pdev->dev, "failed to allocate memory!\n");
 		return -ENOMEM;
 	}
 
-	otg = kzalloc(sizeof *otg, GFP_KERNEL);
-	if (!otg) {
-		kfree(mvotg);
+	otg = devm_kzalloc(&pdev->dev, sizeof(*otg), GFP_KERNEL);
+	if (!otg)
 		return -ENOMEM;
-	}
 
 	platform_set_drvdata(pdev, mvotg);
 
 	mvotg->pdev = pdev;
-	mvotg->pdata = pdata;
 
-	mvotg->clknum = pdata->clknum;
-	for (clk_i = 0; clk_i < mvotg->clknum; clk_i++) {
-		mvotg->clk[clk_i] = clk_get(&pdev->dev, pdata->clkname[clk_i]);
-		if (IS_ERR(mvotg->clk[clk_i])) {
-			retval = PTR_ERR(mvotg->clk[clk_i]);
-			goto err_put_clk;
+	retval = mv_otg_parse_dt(pdev, mvotg);
+	if (retval > 0) {
+		struct mv_usb_platform_data *pdata = pdev->dev.platform_data;
+		/* no CONFIG_OF */
+		int clk_i = 0;
+
+		if (pdata == NULL) {
+			dev_err(&pdev->dev, "missing platform_data\n");
+			return -ENODEV;
 		}
+		mvotg->extern_attr = pdata->extern_attr;
+		mvotg->mode = pdata->mode;
+		mvotg->clknum = pdata->clknum;
+		mvotg->otg_force_a_bus_req = pdata->otg_force_a_bus_req;
+		if (pdata->disable_otg_clock_gating)
+			mvotg->clock_gating = 0;
+
+		size = sizeof(struct clk *) * mvotg->clknum;
+		mvotg->clk = devm_kzalloc(&pdev->dev, size, GFP_KERNEL);
+		if (mvotg->clk == NULL) {
+			dev_err(&pdev->dev,
+				"failed to allocate memory for clk\n");
+			return -ENOMEM;
+		}
+
+		for (clk_i = 0; clk_i < mvotg->clknum; clk_i++) {
+			mvotg->clk[clk_i] = devm_clk_get(&pdev->dev,
+						pdata->clkname[clk_i]);
+			if (IS_ERR(mvotg->clk[clk_i])) {
+				dev_err(&pdev->dev, "failed to get clk %s\n",
+					pdata->clkname[clk_i]);
+				retval = PTR_ERR(mvotg->clk[clk_i]);
+				return retval;
+			}
+		}
+	} else if (retval < 0) {
+		dev_err(&pdev->dev, "error parse dt\n");
+		return retval;
 	}
 
 	mvotg->qwork = create_singlethread_workqueue("mv_otg_queue");
 	if (!mvotg->qwork) {
 		dev_dbg(&pdev->dev, "cannot create workqueue for OTG\n");
-		retval = -ENOMEM;
-		goto err_put_clk;
+		return -ENOMEM;
 	}
 
 	INIT_DELAYED_WORK(&mvotg->work, mv_otg_work);
@@ -764,74 +831,43 @@ static int mv_otg_probe(struct platform_device *pdev)
 	for (i = 0; i < OTG_TIMER_NUM; i++)
 		init_timer(&mvotg->otg_ctrl.timer[i]);
 
-	r = platform_get_resource_byname(mvotg->pdev,
-					 IORESOURCE_MEM, "phyregs");
-	if (r == NULL) {
-		dev_err(&pdev->dev, "no phy I/O memory resource defined\n");
-		retval = -ENODEV;
-		goto err_destroy_workqueue;
-	}
-
-	mvotg->phy_regs = ioremap(r->start, resource_size(r));
-	if (mvotg->phy_regs == NULL) {
-		dev_err(&pdev->dev, "failed to map phy I/O memory\n");
-		retval = -EFAULT;
-		goto err_destroy_workqueue;
-	}
-
-	r = platform_get_resource_byname(mvotg->pdev,
-					 IORESOURCE_MEM, "capregs");
+	r = platform_get_resource(mvotg->pdev,
+					 IORESOURCE_MEM, 0);
 	if (r == NULL) {
 		dev_err(&pdev->dev, "no I/O memory resource defined\n");
 		retval = -ENODEV;
-		goto err_unmap_phyreg;
+		goto err_destroy_workqueue;
 	}
 
-	mvotg->cap_regs = ioremap(r->start, resource_size(r));
+	mvotg->cap_regs = devm_ioremap(&pdev->dev, r->start, resource_size(r));
 	if (mvotg->cap_regs == NULL) {
 		dev_err(&pdev->dev, "failed to map I/O memory\n");
 		retval = -EFAULT;
-		goto err_unmap_phyreg;
+		goto err_destroy_workqueue;
+	}
+	mvotg->mvphy = mv_usb2_get_phy();
+	if (mvotg->mvphy == NULL) {
+		dev_err(&pdev->dev, "failed to get usb phy\n");
+		retval = -ENODEV;
+		goto err_destroy_workqueue;
 	}
 
 	/* we will acces controller register, so enable the udc controller */
 	retval = mv_otg_enable_internal(mvotg);
 	if (retval) {
 		dev_err(&pdev->dev, "mv otg enable error %d\n", retval);
-		goto err_unmap_capreg;
+		goto err_destroy_workqueue;
 	}
 
 	mvotg->op_regs =
 		(struct mv_otg_regs __iomem *) ((unsigned long) mvotg->cap_regs
 			+ (readl(mvotg->cap_regs) & CAPLENGTH_MASK));
 
-	if (pdata->id) {
-		retval = request_threaded_irq(pdata->id->irq, NULL,
-					      mv_otg_inputs_irq,
-					      IRQF_ONESHOT, "id", mvotg);
-		if (retval) {
-			dev_info(&pdev->dev,
-				 "Failed to request irq for ID\n");
-			pdata->id = NULL;
-		}
+	if ((mvotg->extern_attr & MV_USB_HAS_VBUS_DETECTION) ||
+		(mvotg->extern_attr & MV_USB_HAS_IDPIN_DETECTION)) {
+		mvotg->notifier.notifier_call = mv_otg_notifier_call;
+		mv_usb2_register_notifier(mvotg->mvphy, &mvotg->notifier);
 	}
-
-	if (pdata->vbus) {
-		mvotg->clock_gating = 1;
-		retval = request_threaded_irq(pdata->vbus->irq, NULL,
-					      mv_otg_inputs_irq,
-					      IRQF_ONESHOT, "vbus", mvotg);
-		if (retval) {
-			dev_info(&pdev->dev,
-				 "Failed to request irq for VBUS, "
-				 "disable clock gating\n");
-			mvotg->clock_gating = 0;
-			pdata->vbus = NULL;
-		}
-	}
-
-	if (pdata->disable_otg_clock_gating)
-		mvotg->clock_gating = 0;
 
 	mv_otg_reset(mvotg);
 	mv_otg_init_irq(mvotg);
@@ -844,7 +880,7 @@ static int mv_otg_probe(struct platform_device *pdev)
 	}
 
 	mvotg->irq = r->start;
-	if (request_irq(mvotg->irq, mv_otg_irq, IRQF_SHARED,
+	if (devm_request_irq(&pdev->dev, mvotg->irq, mv_otg_irq, IRQF_SHARED,
 			driver_name, mvotg)) {
 		dev_err(&pdev->dev, "Request irq %d for OTG failed\n",
 			mvotg->irq);
@@ -857,14 +893,14 @@ static int mv_otg_probe(struct platform_device *pdev)
 	if (retval < 0) {
 		dev_err(&pdev->dev, "can't register transceiver, %d\n",
 			retval);
-		goto err_free_irq;
+		goto err_disable_clk;
 	}
 
 	retval = sysfs_create_group(&pdev->dev.kobj, &inputs_attr_group);
 	if (retval < 0) {
 		dev_dbg(&pdev->dev,
 			"Can't register sysfs attr group: %d\n", retval);
-		goto err_set_transceiver;
+		goto err_remove_phy;
 	}
 
 	spin_lock_init(&mvotg->wq_lock);
@@ -879,30 +915,15 @@ static int mv_otg_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_set_transceiver:
+err_remove_phy:
 	usb_remove_phy(&mvotg->phy);
-err_free_irq:
-	free_irq(mvotg->irq, mvotg);
 err_disable_clk:
-	if (pdata->vbus)
-		free_irq(pdata->vbus->irq, mvotg);
-	if (pdata->id)
-		free_irq(pdata->id->irq, mvotg);
 	mv_otg_disable_internal(mvotg);
-err_unmap_capreg:
-	iounmap(mvotg->cap_regs);
-err_unmap_phyreg:
-	iounmap(mvotg->phy_regs);
 err_destroy_workqueue:
 	flush_workqueue(mvotg->qwork);
 	destroy_workqueue(mvotg->qwork);
-err_put_clk:
-	for (clk_i--; clk_i >= 0; clk_i--)
-		clk_put(mvotg->clk[clk_i]);
 
 	platform_set_drvdata(pdev, NULL);
-	kfree(otg);
-	kfree(mvotg);
 
 	return retval;
 }
@@ -946,13 +967,19 @@ static int mv_otg_resume(struct platform_device *pdev)
 }
 #endif
 
+static struct of_device_id mv_otg_dt_ids[] = {
+	{ .compatible = "mrvl,mv-otg" },
+};
+MODULE_DEVICE_TABLE(of, mv_otg_dt_ids);
+
 static struct platform_driver mv_otg_driver = {
 	.probe = mv_otg_probe,
 	.remove = __exit_p(mv_otg_remove),
 	.driver = {
-		   .owner = THIS_MODULE,
-		   .name = driver_name,
-		   },
+		.owner = THIS_MODULE,
+		.name = driver_name,
+		.of_match_table = mv_otg_dt_ids,
+	},
 #ifdef CONFIG_PM
 	.suspend = mv_otg_suspend,
 	.resume = mv_otg_resume,
