@@ -9,4 +9,5 @@ obj-$(CONFIG_USB_ISP1301)		+= isp1301.o
 obj-$(CONFIG_MV_U3D_PHY)		+= mv_u3d_phy.o
 obj-$(CONFIG_USB_EHCI_TEGRA)	+= tegra_usb_phy.o
 obj-$(CONFIG_USB_RCAR_PHY)		+= rcar-phy.o
+obj-$(CONFIG_SAMSUNG_USBPHY)		+= samsung-usbphy.o
 obj-$(CONFIG_MV_USB2_PHY)		+= mv_usb2_phy.o
