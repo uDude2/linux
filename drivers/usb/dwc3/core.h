@@ -407,7 +407,6 @@ struct dwc3_event_buffer {
  * @number: endpoint number (1 - 15)
  * @type: set to bmAttributes & USB_ENDPOINT_XFERTYPE_MASK
  * @resource_index: Resource transfer index
- * @current_uf: Current uf received through last event parameter
  * @interval: the intervall on which the ISOC transfer is started
  * @name: a human readable name e.g. ep1out-bulk
  * @direction: true for TX, false for RX
@@ -441,7 +440,6 @@ struct dwc3_ep {
 	u8			number;
 	u8			type;
 	u8			resource_index;
-	u16			current_uf;
 	u32			interval;
 
 	char			name[20];
@@ -583,6 +581,7 @@ struct dwc3_request {
 	struct usb_request	request;
 	struct list_head	list;
 	struct dwc3_ep		*dep;
+	u32			start_slot;
 
 	u8			epnum;
 	struct dwc3_trb		*trb;
@@ -865,10 +864,24 @@ union dwc3_event {
 void dwc3_set_mode(struct dwc3 *dwc, u32 mode);
 int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc);
 
+#if IS_ENABLED(CONFIG_USB_DWC3_HOST) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
 int dwc3_host_init(struct dwc3 *dwc);
 void dwc3_host_exit(struct dwc3 *dwc);
+#else
+static inline int dwc3_host_init(struct dwc3 *dwc)
+{ return 0; }
+static inline void dwc3_host_exit(struct dwc3 *dwc)
+{ }
+#endif
 
+#if IS_ENABLED(CONFIG_USB_DWC3_GADGET) || IS_ENABLED(CONFIG_USB_DWC3_DUAL_ROLE)
 int dwc3_gadget_init(struct dwc3 *dwc);
 void dwc3_gadget_exit(struct dwc3 *dwc);
+#else
+static inline int dwc3_gadget_init(struct dwc3 *dwc)
+{ return 0; }
+static inline void dwc3_gadget_exit(struct dwc3 *dwc)
+{ }
+#endif
 
 #endif /* __DRIVERS_USB_DWC3_CORE_H */
