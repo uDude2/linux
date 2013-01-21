@@ -373,7 +373,7 @@ static void __init smdk4x12_machine_init(void)
 	platform_add_devices(smdk4x12_devices, ARRAY_SIZE(smdk4x12_devices));
 }
 
-MACHINE_START(SMDK4212, "SMDK4212")
+MACHINE_START(ODROIDX, "SMDK4212")
 	/* Maintainer: Kukjin Kim <kgene.kim@samsung.com> */
 	.atag_offset	= 0x100,
 	.smp		= smp_ops(exynos_smp_ops),

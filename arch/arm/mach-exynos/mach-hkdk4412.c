@@ -1201,7 +1201,8 @@ static void __init hkdk4412_machine_init(void)
 	platform_add_devices(hkdk4412_devices, ARRAY_SIZE(hkdk4412_devices));
 }
 
-MACHINE_START(ODROIDX, "ODROID-X")
+//MACHINE_START(ODROIDX, "ODROID-X")
+MACHINE_START(SMDK4212, "ODROID-X")
 	/* Maintainer: Dongjin Kim <dongjin.kim@agreeyamobiity.net> */
 	.atag_offset	= 0x100,
 	.smp		= smp_ops(exynos_smp_ops),
