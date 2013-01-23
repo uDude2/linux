@@ -124,6 +124,11 @@ IS_SAMSUNG_CPU(exynos5250, EXYNOS5250_SOC_ID, EXYNOS5_SOC_MASK)
 #define EXYNOS4210_REV_1_0	(0x10)
 #define EXYNOS4210_REV_1_1	(0x11)
 
+#define EXYNOS4412_REV_0	(0x0)
+#define EXYNOS4412_REV_0_1	(0x01)
+#define EXYNOS4412_REV_1_0	(0x10)
+#define EXYNOS4412_REV_1_1	(0x11)
+
 #if defined(CONFIG_SOC_EXYNOS5250)
 # define soc_is_exynos5250()	is_samsung_exynos5250()
 #else
