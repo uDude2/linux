@@ -94,4 +94,19 @@
 	rtc@10070000 {
 		status = "okay";
 	};
+
+	i2c@13860000 {
+		pinctrl-0 = <&i2c0_bus>;
+		pinctrl-names = "default";
+		status = "okay";
+
+		usb3503@08 {
+			compatible = "smsc,usb3503";
+			reg = <0x08>;
+			connect-gpios = <&gpx3 0 1>;
+			intn-gpios = <&gpx3 4 1>;
+			reset-gpios = <&gpx3 5 1>;
+			initial-mode = <1>;
+		};
+	};
 };
