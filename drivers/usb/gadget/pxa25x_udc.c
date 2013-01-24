@@ -1266,13 +1266,6 @@ static int pxa25x_udc_start(struct usb_gadget *g,
 	dev->gadget.dev.driver = &driver->driver;
 	dev->pullup = 1;
 
-	retval = device_add (&dev->gadget.dev);
-	if (retval) {
-		dev->driver = NULL;
-		dev->gadget.dev.driver = NULL;
-		return retval;
-	}
-
 	/* ... then enable host detection and ep0; and we're ready
 	 * for set_configuration as well as eventual disconnect.
 	 */
@@ -1331,7 +1324,6 @@ static int pxa25x_udc_stop(struct usb_gadget*g,
 	dev->gadget.dev.driver = NULL;
 	dev->driver = NULL;
 
-	device_del (&dev->gadget.dev);
 	dump_state(dev);
 
 	return 0;
@@ -2140,9 +2132,9 @@ static int __init pxa25x_udc_probe(struct platform_device *pdev)
 	dev->timer.function = udc_watchdog;
 	dev->timer.data = (unsigned long) dev;
 
-	device_initialize(&dev->gadget.dev);
 	dev->gadget.dev.parent = &pdev->dev;
 	dev->gadget.dev.dma_mask = pdev->dev.dma_mask;
+	dev->gadget.register_my_device = true;
 
 	the_controller = dev;
 	platform_set_drvdata(pdev, dev);
