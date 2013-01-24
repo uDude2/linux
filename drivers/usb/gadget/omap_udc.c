@@ -2631,10 +2631,9 @@ omap_udc_setup(struct platform_device *odev, struct usb_phy *xceiv)
 	udc->gadget.max_speed = USB_SPEED_FULL;
 	udc->gadget.name = driver_name;
 
-	device_initialize(&udc->gadget.dev);
-	dev_set_name(&udc->gadget.dev, "gadget");
 	udc->gadget.dev.release = omap_udc_release;
 	udc->gadget.dev.parent = &odev->dev;
+	udc->gadget.register_my_device = true;
 	if (use_dma)
 		udc->gadget.dev.dma_mask = odev->dev.dma_mask;
 
@@ -2911,14 +2910,12 @@ bad_on_1710:
 	}
 
 	create_proc_file();
-	status = device_add(&udc->gadget.dev);
+	status = usb_add_gadget_udc(&pdev->dev, &udc->gadget);
 	if (status)
 		goto cleanup4;
 
-	status = usb_add_gadget_udc(&pdev->dev, &udc->gadget);
-	if (!status)
-		return status;
-	/* If fail, fall through */
+	return 0;
+
 cleanup4:
 	remove_proc_file();
 
@@ -2989,7 +2986,6 @@ static int omap_udc_remove(struct platform_device *pdev)
 	release_mem_region(pdev->resource[0].start,
 			pdev->resource[0].end - pdev->resource[0].start + 1);
 
-	device_unregister(&udc->gadget.dev);
 	wait_for_completion(&done);
 
 	return 0;
