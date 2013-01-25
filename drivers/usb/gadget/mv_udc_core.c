@@ -34,9 +34,7 @@
 #include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
-#include <linux/of.h>
 #include <linux/platform_data/mv_usb.h>
-#include <linux/usb/mv_usb2.h>
 #include <asm/unaligned.h>
 
 #include "mv_udc.h"
@@ -1123,8 +1121,8 @@ static int mv_udc_enable_internal(struct mv_udc *udc)
 
 	dev_dbg(&udc->dev->dev, "enable udc\n");
 	udc_clock_enable(udc);
-	if (udc->phy->init) {
-		retval = udc->phy->init(udc->phy);
+	if (udc->pdata->phy_init) {
+		retval = udc->pdata->phy_init(udc->phy_regs);
 		if (retval) {
 			dev_err(&udc->dev->dev,
 				"init phy error %d\n", retval);
@@ -1149,8 +1147,8 @@ static void mv_udc_disable_internal(struct mv_udc *udc)
 {
 	if (udc->active) {
 		dev_dbg(&udc->dev->dev, "disable udc\n");
-		if (udc->phy->shutdown)
-			udc->phy->shutdown(udc->phy);
+		if (udc->pdata->phy_deinit)
+			udc->pdata->phy_deinit(udc->phy_regs);
 		udc_clock_disable(udc);
 		udc->active = 0;
 	}
@@ -2078,16 +2076,15 @@ static irqreturn_t mv_udc_irq(int irq, void *dev)
 	return IRQ_HANDLED;
 }
 
-static int mv_udc_vbus_notifier_call(struct notifier_block *nb,
-				unsigned long val, void *v)
+static irqreturn_t mv_udc_vbus_irq(int irq, void *dev)
 {
-	struct mv_udc *udc = container_of(nb, struct mv_udc, notifier);
+	struct mv_udc *udc = (struct mv_udc *)dev;
 
 	/* polling VBUS and init phy may cause too much time*/
-	if (udc->qwork && val == EVENT_VBUS)
+	if (udc->qwork)
 		queue_work(udc->qwork, &udc->vbus_work);
 
-	return 0;
+	return IRQ_HANDLED;
 }
 
 static void mv_udc_vbus_work(struct work_struct *work)
@@ -2096,12 +2093,10 @@ static void mv_udc_vbus_work(struct work_struct *work)
 	unsigned int vbus;
 
 	udc = container_of(work, struct mv_udc, vbus_work);
-	if (!(udc->extern_attr & MV_USB_HAS_VBUS_DETECTION))
+	if (!udc->pdata->vbus)
 		return;
 
-	if (mv_usb2_extern_call(udc->phy, vbus, get_vbus, &vbus))
-		return;
-
+	vbus = udc->pdata->vbus->poll();
 	dev_info(&udc->dev->dev, "vbus is %d\n", vbus);
 
 	if (vbus == VBUS_HIGH)
@@ -2128,9 +2123,6 @@ static int mv_udc_remove(struct platform_device *pdev)
 
 	usb_del_gadget_udc(&udc->gadget);
 
-	if (udc->extern_attr & MV_USB_HAS_VBUS_DETECTION)
-		mv_usb2_unregister_notifier(udc->phy, &udc->notifier);
-
 	if (udc->qwork) {
 		flush_workqueue(udc->qwork);
 		destroy_workqueue(udc->qwork);
@@ -2154,57 +2146,21 @@ static int mv_udc_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int mv_udc_parse_dt(struct platform_device *pdev,
-				struct mv_udc *udc)
-{
-	struct device_node *np = pdev->dev.of_node;
-	unsigned int clks_num;
-	int i, ret;
-	const char *clk_name;
-
-	if (!np)
-		return 1;
-
-	clks_num = of_property_count_strings(np, "clocks");
-	if (clks_num < 0)
-		return clks_num;
-
-	udc->clk = devm_kzalloc(&pdev->dev,
-		sizeof(struct clk *) * clks_num, GFP_KERNEL);
-	if (udc->clk == NULL)
-		return -ENOMEM;
-
-	for (i = 0; i < clks_num; i++) {
-		ret = of_property_read_string_index(np, "clocks", i,
-			&clk_name);
-		if (ret)
-			return ret;
-		udc->clk[i] = devm_clk_get(&pdev->dev, clk_name);
-		if (IS_ERR(udc->clk[i]))
-			return PTR_ERR(udc->clk[i]);
-	}
-
-	udc->clknum = clks_num;
-
-	ret = of_property_read_u32(np, "extern_attr", &udc->extern_attr);
-	if (ret)
-		return ret;
-
-	ret = of_property_read_u32(np, "mode", &udc->mode);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
 static int mv_udc_probe(struct platform_device *pdev)
 {
+	struct mv_usb_platform_data *pdata = pdev->dev.platform_data;
 	struct mv_udc *udc;
 	int retval = 0;
+	int clk_i = 0;
 	struct resource *r;
 	size_t size;
 
-	size = sizeof(*udc);
+	if (pdata == NULL) {
+		dev_err(&pdev->dev, "missing platform_data\n");
+		return -ENODEV;
+	}
+
+	size = sizeof(*udc) + sizeof(struct clk *) * pdata->clknum;
 	udc = devm_kzalloc(&pdev->dev, size, GFP_KERNEL);
 	if (udc == NULL) {
 		dev_err(&pdev->dev, "failed to allocate memory for udc\n");
@@ -2212,43 +2168,13 @@ static int mv_udc_probe(struct platform_device *pdev)
 	}
 
 	udc->done = &release_done;
+	udc->pdata = pdev->dev.platform_data;
 	spin_lock_init(&udc->lock);
 
 	udc->dev = pdev;
 
-	retval = mv_udc_parse_dt(pdev, udc);
-	if (retval > 0) {
-		/* no CONFIG_OF */
-		struct mv_usb_platform_data *pdata = pdev->dev.platform_data;
-		int clk_i = 0;
-
-		if (pdata == NULL) {
-			dev_err(&pdev->dev, "missing platform_data\n");
-			return -ENODEV;
-		}
-		udc->extern_attr = pdata->extern_attr;
-		udc->mode = pdata->mode;
-		udc->clknum = pdata->clknum;
-
-		size = sizeof(struct clk *) * udc->clknum;
-		udc->clk = devm_kzalloc(&pdev->dev, size, GFP_KERNEL);
-		if (udc->clk == NULL)
-			return -ENOMEM;
-		for (clk_i = 0; clk_i < udc->clknum; clk_i++) {
-			udc->clk[clk_i] = devm_clk_get(&pdev->dev,
-						pdata->clkname[clk_i]);
-			if (IS_ERR(udc->clk[clk_i])) {
-				retval = PTR_ERR(udc->clk[clk_i]);
-				return retval;
-			}
-		}
-	} else if (retval < 0) {
-		dev_err(&pdev->dev, "error parse dt\n");
-		return retval;
-	}
-
 #ifdef CONFIG_USB_OTG_UTILS
-	if (udc->mode == MV_USB_MODE_OTG) {
+	if (pdata->mode == MV_USB_MODE_OTG) {
 		udc->transceiver = devm_usb_get_phy(&pdev->dev,
 					USB_PHY_TYPE_USB2);
 		if (IS_ERR_OR_NULL(udc->transceiver)) {
@@ -2257,7 +2183,18 @@ static int mv_udc_probe(struct platform_device *pdev)
 		}
 	}
 #endif
-	r = platform_get_resource(udc->dev, IORESOURCE_MEM, 0);
+
+	udc->clknum = pdata->clknum;
+	for (clk_i = 0; clk_i < udc->clknum; clk_i++) {
+		udc->clk[clk_i] = devm_clk_get(&pdev->dev,
+					pdata->clkname[clk_i]);
+		if (IS_ERR(udc->clk[clk_i])) {
+			retval = PTR_ERR(udc->clk[clk_i]);
+			return retval;
+		}
+	}
+
+	r = platform_get_resource_byname(udc->dev, IORESOURCE_MEM, "capregs");
 	if (r == NULL) {
 		dev_err(&pdev->dev, "no I/O memory resource defined\n");
 		return -ENODEV;
@@ -2270,9 +2207,17 @@ static int mv_udc_probe(struct platform_device *pdev)
 		return -EBUSY;
 	}
 
-	udc->phy = mv_usb2_get_phy();
-	if (udc->phy == NULL)
+	r = platform_get_resource_byname(udc->dev, IORESOURCE_MEM, "phyregs");
+	if (r == NULL) {
+		dev_err(&pdev->dev, "no phy I/O memory resource defined\n");
 		return -ENODEV;
+	}
+
+	udc->phy_regs = ioremap(r->start, resource_size(r));
+	if (udc->phy_regs == NULL) {
+		dev_err(&pdev->dev, "failed to map phy I/O memory\n");
+		return -EBUSY;
+	}
 
 	/* we will acces controller register, so enable the clk */
 	retval = mv_udc_enable_internal(udc);
@@ -2381,8 +2326,17 @@ static int mv_udc_probe(struct platform_device *pdev)
 	/* VBUS detect: we can disable/enable clock on demand.*/
 	if (udc->transceiver)
 		udc->clock_gating = 1;
-	else if (udc->extern_attr & MV_USB_HAS_VBUS_DETECTION) {
+	else if (pdata->vbus) {
 		udc->clock_gating = 1;
+		retval = devm_request_threaded_irq(&pdev->dev,
+				pdata->vbus->irq, NULL,
+				mv_udc_vbus_irq, IRQF_ONESHOT, "vbus", udc);
+		if (retval) {
+			dev_info(&pdev->dev,
+				"Can not request irq for VBUS, "
+				"disable clock gating\n");
+			udc->clock_gating = 0;
+		}
 
 		udc->qwork = create_singlethread_workqueue("mv_udc_queue");
 		if (!udc->qwork) {
@@ -2392,8 +2346,6 @@ static int mv_udc_probe(struct platform_device *pdev)
 		}
 
 		INIT_WORK(&udc->vbus_work, mv_udc_vbus_work);
-		udc->notifier.notifier_call = mv_udc_vbus_notifier_call;
-		mv_usb2_register_notifier(udc->phy, &udc->notifier);
 	}
 
 	/*
@@ -2417,9 +2369,6 @@ static int mv_udc_probe(struct platform_device *pdev)
 	return 0;
 
 err_create_workqueue:
-	if (!udc->transceiver
-		&& (udc->extern_attr & MV_USB_HAS_VBUS_DETECTION))
-		mv_usb2_unregister_notifier(udc->phy, &udc->notifier);
 	destroy_workqueue(udc->qwork);
 err_unregister:
 	device_unregister(&udc->gadget.dev);
@@ -2438,7 +2387,6 @@ err_disable_clock:
 static int mv_udc_suspend(struct device *dev)
 {
 	struct mv_udc *udc;
-	unsigned int vbus;
 
 	udc = dev_get_drvdata(dev);
 
@@ -2446,16 +2394,11 @@ static int mv_udc_suspend(struct device *dev)
 	if (udc->transceiver)
 		return 0;
 
-	if ((udc->extern_attr & MV_USB_HAS_VBUS_DETECTION) &&
-		mv_usb2_has_extern_call(udc->phy, vbus, get_vbus)) {
-		if (mv_usb2_extern_call(udc->phy, vbus, get_vbus, &vbus))
-			return -EAGAIN;
-
-		if (vbus == VBUS_HIGH) {
+	if (udc->pdata->vbus && udc->pdata->vbus->poll)
+		if (udc->pdata->vbus->poll() == VBUS_HIGH) {
 			dev_info(&udc->dev->dev, "USB cable is connected!\n");
 			return -EAGAIN;
 		}
-	}
 
 	/*
 	 * only cable is unplugged, udc can suspend.
@@ -2521,12 +2464,6 @@ static void mv_udc_shutdown(struct platform_device *pdev)
 	mv_udc_disable(udc);
 }
 
-static struct of_device_id mv_udc_dt_ids[] = {
-	{ .compatible = "mrvl,mv-udc" },
-	{ } /* Terminating Entry */
-};
-MODULE_DEVICE_TABLE(of, mv_udc_dt_ids);
-
 static struct platform_driver udc_driver = {
 	.probe		= mv_udc_probe,
 	.remove		= mv_udc_remove,
@@ -2537,7 +2474,6 @@ static struct platform_driver udc_driver = {
 #ifdef CONFIG_PM
 		.pm	= &mv_udc_pm_ops,
 #endif
-		.of_match_table = mv_udc_dt_ids,
 	},
 };
 

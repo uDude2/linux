@@ -28,13 +28,16 @@ enum {
 	VBUS_HIGH	= 1 << 0,
 };
 
-#define MV_USB_HAS_VBUS_DETECTION	(1 << 0)
-#define MV_USB_HAS_IDPIN_DETECTION	(1 << 1)
+struct mv_usb_addon_irq {
+	unsigned int	irq;
+	int		(*poll)(void);
+};
+
 struct mv_usb_platform_data {
 	unsigned int		clknum;
 	char			**clkname;
-
-	unsigned int		extern_attr;
+	struct mv_usb_addon_irq	*id;	/* Only valid for OTG. ID pin change*/
+	struct mv_usb_addon_irq	*vbus;	/* valid for OTG/UDC. VBUS change*/
 
 	/* only valid for HCD. OTG or Host only*/
 	unsigned int		mode;
@@ -42,12 +45,11 @@ struct mv_usb_platform_data {
 	/* This flag is used for that needs id pin checked by otg */
 	unsigned int    disable_otg_clock_gating:1;
 	/* Force a_bus_req to be asserted */
-	unsigned int    otg_force_a_bus_req:1;
-};
+	 unsigned int    otg_force_a_bus_req:1;
 
-struct mv_usb_phy_platform_data {
-	unsigned int	clknum;
-	char		**clkname;
+	int	(*phy_init)(void __iomem *regbase);
+	void	(*phy_deinit)(void __iomem *regbase);
+	int	(*set_vbus)(unsigned int vbus);
+	int     (*private_init)(void __iomem *opregs, void __iomem *phyregs);
 };
-
 #endif
