@@ -212,7 +212,7 @@ static inline void devm_usb_put_phy(struct device *dev, struct usb_phy *x)
 static inline int usb_bind_phy(const char *dev_name, u8 index,
 				const char *phy_dev_name)
 {
-	return NULL;
+	return -EOPNOTSUPP;
 }
 #endif
 
