@@ -2524,9 +2524,6 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 	udc_controller->gadget.dev.release = fsl_udc_release;
 	udc_controller->gadget.dev.parent = &pdev->dev;
 	udc_controller->gadget.dev.of_node = pdev->dev.of_node;
-	ret = device_register(&udc_controller->gadget.dev);
-	if (ret < 0)
-		goto err_free_irq;
 
 	if (!IS_ERR_OR_NULL(udc_controller->transceiver))
 		udc_controller->gadget.is_otg = 1;
@@ -2559,7 +2556,7 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 			DTD_ALIGNMENT, UDC_DMA_BOUNDARY);
 	if (udc_controller->td_pool == NULL) {
 		ret = -ENOMEM;
-		goto err_unregister;
+		goto err_free_irq;
 	}
 
 	ret = usb_add_gadget_udc(&pdev->dev, &udc_controller->gadget);
@@ -2571,8 +2568,6 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 
 err_del_udc:
 	dma_pool_destroy(udc_controller->td_pool);
-err_unregister:
-	device_unregister(&udc_controller->gadget.dev);
 err_free_irq:
 	free_irq(udc_controller->irq, udc_controller);
 err_iounmap:
@@ -2622,7 +2617,6 @@ static int __exit fsl_udc_remove(struct platform_device *pdev)
 	if (pdata->operating_mode == FSL_USB2_DR_DEVICE)
 		release_mem_region(res->start, resource_size(res));
 
-	device_unregister(&udc_controller->gadget.dev);
 	/* free udc --wait for the release() finished */
 	wait_for_completion(&done);
 

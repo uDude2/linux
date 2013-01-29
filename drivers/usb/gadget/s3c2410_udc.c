@@ -1677,13 +1677,6 @@ static int s3c2410_udc_start(struct usb_gadget *g,
 	udc->driver = driver;
 	udc->gadget.dev.driver = &driver->driver;
 
-	/* Bind the driver */
-	retval = device_add(&udc->gadget.dev);
-	if (retval) {
-		dev_err(&udc->gadget.dev, "Error in device_add() : %d\n", retval);
-		goto register_error;
-	}
-
 	/* Enable udc */
 	s3c2410_udc_enable(udc);
 
@@ -1700,7 +1693,6 @@ static int s3c2410_udc_stop(struct usb_gadget *g,
 {
 	struct s3c2410_udc *udc = to_s3c2410(g);
 
-	device_del(&udc->gadget.dev);
 	udc->driver = NULL;
 
 	/* Disable udc */
@@ -1838,7 +1830,6 @@ static int s3c2410_udc_probe(struct platform_device *pdev)
 		goto err_mem;
 	}
 
-	device_initialize(&udc->gadget.dev);
 	udc->gadget.dev.parent = &pdev->dev;
 	udc->gadget.dev.dma_mask = pdev->dev.dma_mask;
 
