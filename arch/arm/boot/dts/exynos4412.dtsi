@@ -39,4 +39,17 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 	};
+
+	usbphy@125B0000 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "samsung,exynos4x12-usbphy";
+		reg = <0x125B0000 0x100>;
+		status = "disabled";
+		ranges;
+
+		usbphy-sys {
+			reg = <0x10020704 0xc>;
+		};
+	};
 };
