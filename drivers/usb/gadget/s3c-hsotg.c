@@ -28,6 +28,7 @@
 #include <linux/io.h>
 #include <linux/slab.h>
 #include <linux/clk.h>
+#include <linux/of.h>
 #include <linux/regulator/consumer.h>
 
 #include <linux/usb/ch9.h>
@@ -3457,6 +3458,8 @@ static void s3c_hsotg_release(struct device *dev)
 {
 }
 
+static u64 s3c_hsotg_dma_mask = DMA_BIT_MASK(32);
+
 /**
  * s3c_hsotg_probe - probe function for hsotg driver
  * @pdev: The platform information for the driver
@@ -3473,6 +3476,14 @@ static int s3c_hsotg_probe(struct platform_device *pdev)
 	int epnum;
 	int ret;
 	int i;
+
+	/*
+	 * Right now device-tree probed devices don't get dma_mask set.
+	 */
+	if (!pdev->dev.dma_mask)
+		pdev->dev.dma_mask = &s3c_hsotg_dma_mask;
+	if (!pdev->dev.coherent_dma_mask)
+		pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
 
 	hsotg = devm_kzalloc(&pdev->dev, sizeof(struct s3c_hsotg), GFP_KERNEL);
 	if (!hsotg) {
@@ -3666,10 +3677,19 @@ static int s3c_hsotg_remove(struct platform_device *pdev)
 #define s3c_hsotg_resume NULL
 #endif
 
+#ifdef CONFIG_OF
+static const struct of_device_id exynos_hsotg_match[] = {
+	{ .compatible = "samsung,exynos-hsotg" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, exynos_hsotg_match);
+#endif
+
 static struct platform_driver s3c_hsotg_driver = {
 	.driver		= {
 		.name	= "s3c-hsotg",
 		.owner	= THIS_MODULE,
+		.of_match_table	= of_match_ptr(exynos_hsotg_match),
 	},
 	.probe		= s3c_hsotg_probe,
 	.remove		= s3c_hsotg_remove,
