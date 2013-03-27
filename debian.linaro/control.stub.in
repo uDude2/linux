@@ -6,7 +6,7 @@ Standards-Version: 3.8.4.0
 Build-Depends: debhelper (>= 5), cpio, module-init-tools, kernel-wedge (>= 2.24ubuntu1), makedumpfile [amd64 i386], libelf-dev, libnewt-dev, binutils-dev, rsync, libdw-dev, dpkg (>= 1.16.0~ubuntu4), util-linux, pkg-config, flex, bison, libunwind8-dev, libaudit-dev [amd64 i386]
 Build-Depends-Indep: xmlto, docbook-utils, ghostscript, transfig, bzip2, sharutils, asciidoc
 Build-Conflicts: findutils (= 4.4.1-1ubuntu1)
-Vcs-Git: http://kernel.ubuntu.com/git-repos/ubuntu/ubuntu-raring.git
+Vcs-Git: git://github.com/tobetter/linux.git linux-linaro-odroidx-3.7_3.7.0-1.1--ci+130327021923
 
 Package: SRCPKGNAME-headers-PKGVER-ABINUM
 Architecture: armhf
@@ -18,7 +18,7 @@ Description: Header files related to Linux kernel version PKGVER
  that want the latest kernel headers. Please read
  /usr/share/doc/SRCPKGNAME-headers-PKGVER-ABINUM/debian.README.gz for details
 
-Package: linux-linaro-tools-PKGVER-ABINUM-linaro-SOCFLAVOUR
+Package: linux-linaro-tools-PKGVER-ABINUM-linaro-odroidx
 Architecture: armhf
 Section: devel
 Priority: optional
