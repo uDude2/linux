@@ -177,7 +177,7 @@ ifneq ($(wildcard $(CURDIR)/tools),)
 else
 	do_tools?=false
 endif
-tools_pkg_name=linux-linaro-tools-$(abi_release)-linaro-SOCFLAVOUR
+tools_pkg_name=linux-linaro-tools-$(abi_release)-linaro-odroidx
 tools_common_pkg_name=$(src_pkg_name)-tools-common
 
 # The general flavour specific image package.
