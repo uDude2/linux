@@ -61,7 +61,7 @@ value CONFIG_FB_VESA m | !exists CONFIG_FB_VESA
 value CONFIG_INPUT_UINPUT y
 
 # upstart relies on getting all of the kernel arguments
-value CONFIG_INIT_PASS_ALL_PARAMS y
+#value CONFIG_INIT_PASS_ALL_PARAMS y
 
 # Enabling CONFIG_IMA is vastly expensive, ensure it is off
 value CONFIG_IMA n
@@ -114,9 +114,9 @@ value CONFIG_EFI_VARS y | !exists CONFIG_EFI_VARS
 value CONFIG_AUDIT_LOGINUID_IMMUTABLE n
 
 # CONFIG_I2C_DESIGNWARE_PLATFORM is required by Calxeda Highbank
-(flavour highbank &/ value CONFIG_I2C_DESIGNWARE_PLATFORM y) | \
-value CONFIG_I2C_DESIGNWARE_PLATFORM m | \
-!exists CONFIG_I2C_DESIGNWARE_PLATFORM
+#(flavour highbank &/ value CONFIG_I2C_DESIGNWARE_PLATFORM y) | \
+#value CONFIG_I2C_DESIGNWARE_PLATFORM m | \
+#!exists CONFIG_I2C_DESIGNWARE_PLATFORM
 
 # Don't use the generic ehci/ohci code on omap, it doesn't work
 ((flavour omap &/ value CONFIG_USB_EHCI_HCD_PLATFORM n & value CONFIG_USB_OHCI_HCD_PLATFORM n) | \
