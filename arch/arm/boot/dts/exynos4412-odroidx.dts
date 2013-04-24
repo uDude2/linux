@@ -22,6 +22,10 @@
 		reg = <0x40000000 0x40000000>;
 	};
 
+	chosen {
+		bootargs = "root=/dev/mmcblk0p3 rw init=/sbin/init mem=1023M console=ttySAC1,115200N8 rootdelay=5 panic=5";
+	};
+
 	leds {
 		compatible = "gpio-leds";
 		led1 {
