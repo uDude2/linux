@@ -96,6 +96,11 @@
 		status = "okay";
 	};
 
+	firmware@0x0204F000 {
+		compatible = "samsung,secure-firmware";
+		reg = <0x0204f0000 0x1000>;
+	};
+
 	fixed-rate-clocks {
 		xxti {
 			compatible = "samsung,clock-xxti";
