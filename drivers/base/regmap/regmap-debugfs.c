@@ -97,7 +97,8 @@ static unsigned int regmap_debugfs_get_dump_start(struct regmap *map,
 					c->max = p - 1;
 					fpos_offset = c->max - c->min;
 					reg_offset = fpos_offset / map->debugfs_tot_len;
-					c->max_reg = c->base_reg + reg_offset;
+					c->max_reg = c->base_reg +
+						(reg_offset * map->reg_stride);
 					list_add_tail(&c->list,
 						      &map->debugfs_off_cache);
 					c = NULL;
@@ -126,7 +127,7 @@ static unsigned int regmap_debugfs_get_dump_start(struct regmap *map,
 		c->max = p - 1;
 		fpos_offset = c->max - c->min;
 		reg_offset = fpos_offset / map->debugfs_tot_len;
-		c->max_reg = c->base_reg + reg_offset;
+		c->max_reg = c->base_reg + (reg_offset * map->reg_stride);
 		list_add_tail(&c->list,
 			      &map->debugfs_off_cache);
 	}
@@ -145,7 +146,7 @@ static unsigned int regmap_debugfs_get_dump_start(struct regmap *map,
 			fpos_offset = from - c->min;
 			reg_offset = fpos_offset / map->debugfs_tot_len;
 			*pos = c->min + (reg_offset * map->debugfs_tot_len);
-			return c->base_reg + reg_offset;
+			return c->base_reg + (reg_offset * map->reg_stride);
 		}
 
 		*pos = c->max;
