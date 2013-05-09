@@ -703,22 +703,19 @@ fail:
 /*
  * Release the journal device
  */
-static int ext4_blkdev_put(struct block_device *bdev)
+static void ext4_blkdev_put(struct block_device *bdev)
 {
-	return blkdev_put(bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
+	blkdev_put(bdev, FMODE_READ|FMODE_WRITE|FMODE_EXCL);
 }
 
-static int ext4_blkdev_remove(struct ext4_sb_info *sbi)
+static void ext4_blkdev_remove(struct ext4_sb_info *sbi)
 {
 	struct block_device *bdev;
-	int ret = -ENODEV;
-
 	bdev = sbi->journal_bdev;
 	if (bdev) {
-		ret = ext4_blkdev_put(bdev);
+		ext4_blkdev_put(bdev);
 		sbi->journal_bdev = NULL;
 	}
-	return ret;
 }
 
 static inline struct inode *orphan_list_entry(struct list_head *l)
@@ -1806,7 +1803,7 @@ static int options_seq_show(struct seq_file *seq, void *offset)
 
 static int options_open_fs(struct inode *inode, struct file *file)
 {
-	return single_open(file, options_seq_show, PDE(inode)->data);
+	return single_open(file, options_seq_show, PDE_DATA(inode));
 }
 
 static const struct file_operations ext4_seq_options_fops = {
