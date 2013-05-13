@@ -158,6 +158,59 @@ static void samsung_exynos5_usb2phy_enable(struct samsung_usbphy *sphy)
 	writel(ohcictrl, regs + EXYNOS5_PHY_HOST_OHCICTRL);
 }
 
+static bool exynos4_phyhost_is_on(void *regs)
+{
+	u32 reg;
+
+	reg = readl(regs + SAMSUNG_PHYPWR);
+
+	return !(reg & PHYPWR_ANALOG_POWERDOWN_PHY1);
+}
+
+static void samsung_exynos4x12_usb2phy_enable(struct samsung_usbphy *sphy)
+{
+	void __iomem *regs = sphy->regs;
+	u32 phypwr;
+	u32 phyclk;
+	u32 rstcon;
+
+	/*
+	 * phy_usage helps in keeping usage count for phy
+	 * so that the first consumer enabling the phy is also
+	 * the last consumer to disable it.
+	 */
+
+	atomic_inc(&sphy->phy_usage);
+
+	if (exynos4_phyhost_is_on(regs)) {
+		dev_info(sphy->dev, "Already power on PHY\n");
+		return;
+	}
+
+	writel(EXYNOS_USBPHY_ENABLE, sphy->pmuregs + EXYNOS4X12_PHY_HSIC_CTRL0);
+	writel(EXYNOS_USBPHY_ENABLE, sphy->pmuregs + EXYNOS4X12_PHY_HSIC_CTRL1);
+
+	/* Common block configuration during suspend */
+	phyclk = sphy->ref_clk_freq
+		& ~(PHYCLK_COMMON_ON_N_PHY1);
+	writel(phyclk, regs + SAMSUNG_PHYCLK);
+
+	/* Enable normal mode of Host */
+	phypwr = readl(regs + SAMSUNG_PHYPWR);
+	phypwr &= ~(PHYPWR_NORMAL_MASK_HSIC0 | PHYPWR_NORMAL_MASK_HSIC1
+			| PHYPWR_NORMAL_MASK_PHY1);
+	writel(phypwr, regs + SAMSUNG_PHYPWR);
+
+	/* Reset both PHY and Link of Host */
+	rstcon = readl(regs + SAMSUNG_RSTCON)
+		| (RSTCON_HLINK_SWRST_MASK | RSTCON_PHY1_SWRST_MASK);
+	writel(rstcon, regs + SAMSUNG_RSTCON);
+	udelay(10);
+	rstcon &= ~(RSTCON_HLINK_SWRST_MASK | RSTCON_PHY1_SWRST_MASK);
+	writel(rstcon, regs + SAMSUNG_RSTCON);
+	udelay(80);
+}
+
 static void samsung_usb2phy_enable(struct samsung_usbphy *sphy)
 {
 	void __iomem *regs = sphy->regs;
@@ -228,6 +281,27 @@ static void samsung_exynos5_usb2phy_disable(struct samsung_usbphy *sphy)
 	writel(phyotg, regs + EXYNOS5_PHY_OTG_SYS);
 }
 
+static void samsung_exynos4x12_usb2phy_disable(struct samsung_usbphy *sphy)
+{
+	void __iomem *regs = sphy->regs;
+	u32 phypwr;
+
+	if (atomic_dec_return(&sphy->phy_usage) > 0) {
+		dev_info(sphy->dev, "still being used\n");
+		return;
+	}
+
+	/* unset to normal of Host and Device */
+	phypwr = readl(regs + SAMSUNG_PHYPWR)
+		| (PHYPWR_NORMAL_MASK_PHY1
+				| PHYPWR_NORMAL_MASK_HSIC1
+				| PHYPWR_NORMAL_MASK_HSIC0);
+	writel(phypwr, regs + SAMSUNG_PHYPWR);
+
+	writel(0, sphy->pmuregs + EXYNOS4X12_PHY_HSIC_CTRL0);
+	writel(0, sphy->pmuregs + EXYNOS4X12_PHY_HSIC_CTRL1);
+}
+
 static void samsung_usb2phy_disable(struct samsung_usbphy *sphy)
 {
 	void __iomem *regs = sphy->regs;
@@ -293,6 +367,8 @@ static int samsung_usb2phy_init(struct usb_phy *phy)
 	/* Initialize usb phy registers */
 	if (sphy->drv_data->cpu_type == TYPE_EXYNOS5250)
 		samsung_exynos5_usb2phy_enable(sphy);
+	else if (sphy->drv_data->cpu_type == TYPE_EXYNOS4X12)
+		samsung_exynos4x12_usb2phy_enable(sphy);
 	else
 		samsung_usb2phy_enable(sphy);
 
@@ -336,6 +412,8 @@ static void samsung_usb2phy_shutdown(struct usb_phy *phy)
 	/* De-initialize usb phy registers */
 	if (sphy->drv_data->cpu_type == TYPE_EXYNOS5250)
 		samsung_exynos5_usb2phy_disable(sphy);
+	if (sphy->drv_data->cpu_type == TYPE_EXYNOS4X12)
+		samsung_exynos4x12_usb2phy_disable(sphy);
 	else
 		samsung_usb2phy_disable(sphy);
 
@@ -451,6 +529,12 @@ static const struct samsung_usbphy_drvdata usb2phy_exynos4 = {
 	.hostphy_en_mask	= EXYNOS_USBPHY_ENABLE,
 };
 
+static const struct samsung_usbphy_drvdata usb2phy_exynos4x12 = {
+	.cpu_type		= TYPE_EXYNOS4X12,
+	.devphy_en_mask		= EXYNOS_USBPHY_ENABLE,
+	.hostphy_en_mask	= EXYNOS_USBPHY_ENABLE,
+};
+
 static struct samsung_usbphy_drvdata usb2phy_exynos5 = {
 	.cpu_type		= TYPE_EXYNOS5250,
 	.hostphy_en_mask	= EXYNOS_USBPHY_ENABLE,
@@ -465,6 +549,9 @@ static const struct of_device_id samsung_usbphy_dt_match[] = {
 	}, {
 		.compatible = "samsung,exynos4210-usb2phy",
 		.data = &usb2phy_exynos4,
+	}, {
+		.compatible = "samsung,exynos4x12-usb2phy",
+		.data = &usb2phy_exynos4x12,
 	}, {
 		.compatible = "samsung,exynos5250-usb2phy",
 		.data = &usb2phy_exynos5
@@ -481,6 +568,9 @@ static struct platform_device_id samsung_usbphy_driver_ids[] = {
 	}, {
 		.name		= "exynos4210-usb2phy",
 		.driver_data	= (unsigned long)&usb2phy_exynos4,
+	}, {
+		.name		= "exynos4x12-usb2phy",
+		.driver_data	= (unsigned long)&usb2phy_exynos4x12,
 	}, {
 		.name		= "exynos5250-usb2phy",
 		.driver_data	= (unsigned long)&usb2phy_exynos5,

@@ -91,10 +91,11 @@ void samsung_usbphy_set_isolation(struct samsung_usbphy *sphy, bool on)
 		 */
 		break;
 	case TYPE_EXYNOS4210:
+	case TYPE_EXYNOS4X12:
 		/*
-		 * Fall through since exynos4210 and exynos5250 have similar
-		 * register architecture: two separate registers for host and
-		 * device phy control with enable bit at position 0.
+		 * Fall through since exynos4210/4x12 and exynos5250 have
+		 * similar register architecture: two separateregistersfor
+		 * host and device phy control with enable bit at position 0.
 		 */
 	case TYPE_EXYNOS5250:
 		if (sphy->phy_type == USB_PHY_TYPE_DEVICE) {
@@ -203,6 +204,29 @@ int samsung_usbphy_get_refclk_freq(struct samsung_usbphy *sphy)
 			break;
 		case 50 * MHZ:
 			refclk_freq = FSEL_CLKSEL_50M;
+			break;
+		case 24 * MHZ:
+		default:
+			/* default reference clock */
+			refclk_freq = FSEL_CLKSEL_24M;
+			break;
+		}
+	} else if (sphy->drv_data->cpu_type == TYPE_EXYNOS4X12) {
+		switch (clk_get_rate(ref_clk)) {
+		case 9600 * KHZ:
+			refclk_freq = FSEL_CLKSEL_9600K;
+			break;
+		case 10 * MHZ:
+			refclk_freq = FSEL_CLKSEL_10M;
+			break;
+		case 12 * MHZ:
+			refclk_freq = FSEL_CLKSEL_12M;
+			break;
+		case 19200 * KHZ:
+			refclk_freq = FSEL_CLKSEL_19200K;
+			break;
+		case 20 * MHZ:
+			refclk_freq = FSEL_CLKSEL_20M;
 			break;
 		case 24 * MHZ:
 		default:

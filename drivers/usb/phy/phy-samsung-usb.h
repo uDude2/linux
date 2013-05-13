@@ -47,6 +47,23 @@
 #define RSTCON_HLINK_SWRST			(0x1 << 1)
 #define RSTCON_SWRST				(0x1 << 0)
 
+/* For Exynos4x12 */
+#define PHYCLK_COMMON_ON_N_PHY0			(0x1 << 4)
+#define PHYCLK_COMMON_ON_N_PHY1			(0x1 << 7)
+
+#define PHYPWR_NORMAL_MASK_HSIC1		(0x7 << 12)
+#define PHYPWR_NORMAL_MASK_HSIC0		(0x7 << 9)
+#define PHYPWR_NORMAL_MASK_PHY1			(0x7 << 6)
+
+#define PHYPWR_ANALOG_POWERDOWN_PHY1		(0x1 << 7)
+
+#define RSTCON_HLINK_SWRST_MASK			(0xf << 7)
+#define RSTCON_PHY1_SWRST_MASK			(0xf << 3)
+#define RSTCON_PHY0_SWRST_MASK			(0x7 << 0)
+
+#define EXYNOS4X12_PHY_HSIC_CTRL0		(0x04)
+#define EXYNOS4X12_PHY_HSIC_CTRL1		(0x08)
+
 /* EXYNOS5 */
 #define EXYNOS5_PHY_HOST_CTRL0			(0x00)
 
@@ -241,6 +258,7 @@
 enum samsung_cpu_type {
 	TYPE_S3C64XX,
 	TYPE_EXYNOS4210,
+	TYPE_EXYNOS4X12,
 	TYPE_EXYNOS5250,
 };
 
