@@ -84,6 +84,14 @@
 		status = "okay";
 	};
 
+	ehci@12580000 {
+		status = "okay";
+	};
+
+	ohci@12590000 {
+		status = "okay";
+	};
+
 	serial@13800000 {
 		status = "okay";
 	};
