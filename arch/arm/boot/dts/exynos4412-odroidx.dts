@@ -76,6 +76,31 @@
 		status = "okay";
 	};
 
+	fimd@11c00000 {
+		pinctrl-0 = <&lcd_clk &lcd_data24>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+
+	display-timings {
+		native-mode = <&timing0>;
+		timing0: timing {
+			clock-frequency = <500000>;
+			hactive = <1366>;
+			vactive = <768>;
+			hfront-porch = <48>;
+			hback-porch = <80>;
+			hsync-len = <32>;
+			vback-porch = <14>;
+			vfront-porch = <3>;
+			vsync-len = <5>;
+			pixelclk-active = <1>;
+			hsync-active = <1>;
+			vsync-active = <1>;
+			de-active = <0>;
+		};
+	};
+
 	sdhci@12530000 {
 		bus-width = <4>;
 		pinctrl-0 = <&sd2_clk &sd2_cmd &sd2_cd &sd2_bus4>;
