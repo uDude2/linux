@@ -45,7 +45,8 @@
 	mmc@12550000 {
 		pinctrl-0 = <&sd4_clk &sd4_cmd &sd4_bus4 &sd4_bus8>;
 		pinctrl-names = "default";
-		vmmc-supply = <&ldo20_reg &buck8_reg>;
+		vqmmc-supply = <&ldo20_reg>;
+		vmmc-supply = <&buck8_reg>;
 		status = "okay";
 
 		num-slots = <1>;
@@ -111,7 +112,8 @@
 		bus-width = <4>;
 		pinctrl-0 = <&sd2_clk &sd2_cmd &sd2_cd &sd2_bus4>;
 		pinctrl-names = "default";
-		vmmc-supply = <&ldo4_reg &ldo21_reg>;
+		vqmmc-supply = <&ldo4_reg>;
+		vmmc-supply = <&ldo21_reg>;
 		status = "okay";
 	};
 
@@ -276,8 +278,6 @@
 					regulator-name = "LDO21_3.3V";
 					regulator-min-microvolt = <3300000>;
 					regulator-max-microvolt = <3300000>;
-					regulator-always-on;
-					regulator-boot-on;
 				};
 
 				ldo25_reg: LDO25 {
