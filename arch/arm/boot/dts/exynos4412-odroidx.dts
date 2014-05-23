@@ -62,14 +62,20 @@
 		};
 	};
 
-	regulator_p3v3 {
-		compatible = "regulator-fixed";
-		regulator-name = "p3v3_en";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-		gpio = <&gpa1 1 1>;
-		enable-active-high;
-		regulator-boot-on;
+	regulators {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		p3v3_reg: regulator_p3v3 {
+			compatible = "regulator-fixed";
+			regulator-name = "p3v3_reg";
+			regulator-min-microvolt = <3300000>;
+			regulator-max-microvolt = <3300000>;
+			gpio = <&gpa1 1 0>;
+			enable-active-high;
+			regulator-always-on;
+		};
 	};
 
 	rtc@10070000 {
