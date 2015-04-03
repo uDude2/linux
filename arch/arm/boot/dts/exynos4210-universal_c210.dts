@@ -235,6 +235,10 @@
 	};
 };
 
+&cpu0 {
+	cpu0-supply = <&vdd_arm_reg>;
+};
+
 &ehci {
 	status = "okay";
 	port@0 {
