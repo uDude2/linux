@@ -878,4 +878,9 @@
                          	<1 10 0xf08>;
             	clock-frequency = <24000000>;
     	};
+
+	ir: ir-receiver {
+		compatible = "gpio-ir-receiver";
+		gpios = <&gpx2 1 0>;
+	};
 };
