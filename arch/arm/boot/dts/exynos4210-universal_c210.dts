@@ -575,3 +575,7 @@
 &serial_3 {
 	status = "okay";
 };
+
+&cpu0 {
+	cpu0-supply = <&vdd_arm_reg>;
+};
