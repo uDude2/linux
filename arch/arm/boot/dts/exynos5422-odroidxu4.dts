@@ -18,3 +18,7 @@
 	model = "Hardkernel Odroid XU4";
 	compatible = "hardkernel,odroid-xu4", "samsung,exynos5800", "samsung,exynos5";
 };
+
+&usbdrd_dwc3_1 {
+	dr_mode = "host";
+};
