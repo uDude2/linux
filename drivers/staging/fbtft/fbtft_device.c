@@ -22,6 +22,7 @@
 #include <linux/init.h>
 #include <linux/gpio.h>
 #include <linux/spi/spi.h>
+#include <linux/platform_data/spi-s3c64xx.h>
 
 #include "fbtft.h"
 
@@ -196,6 +197,11 @@ static int waveshare32b_init_sequence[] = {
 	-1, 0xE1, 0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, 0x31,
 	0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F,
 	-1, 0x11, -2, 120, -1, 0x29, -1, 0x2c, -3 };
+
+static struct s3c64xx_spi_csinfo hktft9340_controller_data = {
+	.fb_delay = 1,
+	.line = 190,
+};
 
 /* Supported displays in alphabetical order */
 static struct fbtft_device_display displays[] = {
@@ -711,6 +717,26 @@ static struct fbtft_device_display displays[] = {
 				},
 				.bgr = true,
 				.gpios = (const struct fbtft_gpio []) {
+					{},
+				},
+			}
+		}
+	}, {
+		.name = "hktft9340",
+		.spi = &(struct spi_board_info) {
+			.modalias = "fb_ili9340",
+			.max_speed_hz = 40000000,
+			.mode = SPI_MODE_0,
+			.controller_data = &hktft9340_controller_data,
+			.platform_data = &(struct fbtft_platform_data) {
+				.display = {
+					.buswidth = 8,
+					.backlight = 1,
+				},
+				.bgr = true,
+				.gpios = (const struct fbtft_gpio []) {
+					{ "reset", 21 },
+					{ "dc", 22 },
 					{},
 				},
 			}
