@@ -17,6 +17,10 @@
 / {
 	model = "Hardkernel Odroid XU4";
 	compatible = "hardkernel,odroid-xu4", "samsung,exynos5800", "samsung,exynos5";
+
+	pwmleds {
+		/delete-node/ greenled;
+	};
 };
 
 &usbdrd_dwc3_1 {
