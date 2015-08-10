@@ -21,6 +21,10 @@
 	pwmleds {
 		/delete-node/ greenled;
 	};
+
+	gpioleds {
+		/delete-node/ redled;
+	};
 };
 
 &usbdrd_dwc3_1 {
